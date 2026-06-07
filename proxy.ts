@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 // Routes that don't require authentication
 const PUBLIC_ROUTES = ['/login', '/auth/callback']
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Start with a pass-through response; the Supabase client may replace it
   // with one that has refreshed session cookies.
   let supabaseResponse = NextResponse.next({ request })

@@ -105,10 +105,8 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {projects.map(p => (
               <Link key={p.id} href={`/projects/${p.id}`}
-                className="block rounded-xl p-5 transition-all hover:-translate-y-0.5"
-                style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}
-                onMouseOver={(e) => (e.currentTarget.style.borderColor = 'var(--border-md)')}
-                onMouseOut={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}>
+                className="block rounded-xl p-5 card-hover"
+                style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
 
                 {/* Status dot + code */}
                 <div className="flex items-center justify-between mb-3">

@@ -42,6 +42,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [digitizing, setDigitizing] = useState(false)
+  const [bgImageUrl, setBgImageUrl] = useState<string | null>(null)
+  const [detectCount, setDetectCount] = useState<number | null>(null)
+  const [detectError, setDetectError] = useState<string | null>(null)
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
   const [unitCode, setUnitCode] = useState('')
@@ -105,25 +108,49 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
   async function handleDigitize(file: File) {
     setDigitizing(true)
-    const fd = new FormData()
-    fd.append('image', file)
-    const res = await fetch(`/api/v1/projects/${id}/map/digitize`, { method: 'POST', body: fd })
-    const json = await res.json()
-    if (json.data?.detected_units) {
-      const mapped: CanvasUnit[] = json.data.detected_units.map((d: {
+    setDetectCount(null)
+    setDetectError(null)
+
+    // Show the uploaded image as canvas background immediately
+    const localUrl = URL.createObjectURL(file)
+    setBgImageUrl(localUrl)
+
+    try {
+      const fd = new FormData()
+      fd.append('image', file)
+      const res = await fetch(`/api/v1/projects/${id}/map/digitize`, { method: 'POST', body: fd })
+      const json = await res.json()
+
+      if (!res.ok) {
+        setDetectError(json.error?.message ?? `Server error ${res.status}`)
+        setDigitizing(false)
+        return
+      }
+
+      const detected: Array<{
         temp_id: string; suggested_code: string; type: UnitType;
         coordinates: { x: number; y: number; width: number; height: number }
         label_detected: string | null
-      }) => ({
-        id: d.temp_id,
-        unit_code: d.suggested_code ?? d.temp_id,
-        unit_type: d.type,
-        x: d.coordinates.x, y: d.coordinates.y,
-        width: d.coordinates.width, height: d.coordinates.height,
-        label: d.label_detected ?? undefined,
-      }))
-      setUnits(mapped)
+      }> = json.data?.detected_units ?? []
+
+      if (detected.length > 0) {
+        const mapped: CanvasUnit[] = detected.map(d => ({
+          id: d.temp_id,
+          unit_code: d.suggested_code ?? d.temp_id,
+          unit_type: d.type ?? 'house',
+          x: d.coordinates.x, y: d.coordinates.y,
+          width: d.coordinates.width, height: d.coordinates.height,
+          label: d.label_detected ?? undefined,
+        }))
+        setUnits(mapped)
+        setDetectCount(mapped.length)
+      } else {
+        setDetectCount(0)
+      }
+    } catch (e) {
+      setDetectError('Koneksi gagal — periksa internet dan coba lagi')
     }
+
     setDigitizing(false)
   }
 
@@ -220,15 +247,38 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             units={units} onChange={setUnits}
             selectedId={selectedId} onSelect={setSelectedId}
             tool={tool}
+            bgImageUrl={bgImageUrl ?? undefined}
           />
+
+          {/* Gemini loading overlay */}
           {digitizing && (
             <div className="absolute inset-0 flex items-center justify-center"
-              style={{ background: 'rgba(8,10,16,0.7)' }}>
+              style={{ background: 'rgba(8,10,16,0.75)' }}>
               <div className="text-center">
                 <div className="text-3xl mb-3 animate-pulse">🤖</div>
                 <p className="text-sm font-medium" style={{ color: 'var(--t1)' }}>Gemini sedang menganalisis denah...</p>
                 <p className="text-xs mt-1" style={{ color: 'var(--t3)' }}>Biasanya 5–15 detik</p>
               </div>
+            </div>
+          )}
+
+          {/* Detection result / error banner */}
+          {(detectCount !== null || detectError) && !digitizing && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 max-w-lg"
+              style={{
+                background: detectError ? 'rgba(239,68,68,0.15)' : detectCount! > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)',
+                border: `1px solid ${detectError ? 'rgba(239,68,68,0.4)' : detectCount! > 0 ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)'}`,
+                color: detectError ? 'var(--red)' : detectCount! > 0 ? 'var(--green)' : 'var(--amber)',
+                backdropFilter: 'blur(8px)',
+                whiteSpace: 'nowrap',
+              }}>
+              {detectError
+                ? `✕ Error: ${detectError}`
+                : detectCount! > 0
+                  ? `✓ Gemini mendeteksi ${detectCount} unit — periksa & sesuaikan, lalu simpan`
+                  : '⚠ Tidak ada unit terdeteksi — lihat terminal untuk detail, atau gambar manual'}
+              <button onClick={() => { setDetectCount(null); setDetectError(null) }}
+                className="ml-2 opacity-60 hover:opacity-100 flex-shrink-0">×</button>
             </div>
           )}
         </div>

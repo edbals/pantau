@@ -104,9 +104,9 @@ Trade-off: SVG performance degrades above ~2000 elements. For 500-unit sites thi
 
 ## 2026-06-07 — Gemini model fallback chain
 
-**Decision:** The digitize endpoint tries models in order: `gemini-2.5-flash` → `gemini-2.0-flash` → `gemini-1.5-flash`. It moves to the next model only on 503 (overloaded), not on other errors.
+**Decision:** The digitize endpoint tries models in order: `gemini-2.5-flash` → `gemini-3.5-flash` → `gemini-2.0-flash-001` → `gemini-2.0-flash-lite`. It moves to the next model on 503 (overloaded) or 404 (model unavailable).
 
-**Why:** Gemini 2.5 Flash gets 503 errors under high load on the free tier. Billing has since been enabled which reduces this, but the fallback chain is kept as resilience. A 503 on the primary model should never result in a user-facing failure.
+**Why:** Model availability changes — `gemini-2.0-flash` returned 404 in production despite appearing in the models list. Always use pinned versions (`gemini-2.0-flash-001`) not aliases. Fallback chain verified against live API 2026-06-07. Billing is enabled so 503s are rare but kept as resilience.
 
 **Where:** `app/api/v1/projects/[id]/map/digitize/route.ts`
 
