@@ -18,7 +18,9 @@ export interface CanvasUnit {
   label?: string
 }
 
-type Tool = 'select' | 'draw' | 'delete'
+export type Tool = 'select' | 'draw' | 'delete' | 'grid'
+
+export interface GridRect { x: number; y: number; width: number; height: number }
 
 interface Props {
   units: CanvasUnit[]
@@ -29,6 +31,7 @@ interface Props {
   bgImageUrl?: string
   readOnly?: boolean
   showProgress?: boolean
+  onGridRect?: (rect: GridRect) => void  // fired when grid tool finishes drawing
 }
 
 const TYPE_STYLE: Record<UnitType, { stroke: string; fill: string; dash?: string }> = {
@@ -58,7 +61,7 @@ let uidCounter = 1
 function uid() { return `u_${Date.now()}_${uidCounter++}` }
 
 export default function MapCanvas({
-  units, onChange, selectedId, onSelect, tool, bgImageUrl, readOnly = false, showProgress = false,
+  units, onChange, selectedId, onSelect, tool, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -122,13 +125,18 @@ export default function MapCanvas({
           if (nw > 0.015 && nh > 0.015) {
             const nx = Math.min(startX, x) / svgSize.w
             const ny = Math.min(startY, y) / svgSize.h
-            const newUnit: CanvasUnit = {
-              id: uid(),
-              unit_code: `U-${String(units.length + 1).padStart(2, '0')}`,
-              unit_type: 'house', x: nx, y: ny, width: nw, height: nh,
+            if (tool === 'grid' && onGridRect) {
+              // Hand off to parent — parent shows grid config panel
+              onGridRect({ x: nx, y: ny, width: nw, height: nh })
+            } else {
+              const newUnit: CanvasUnit = {
+                id: uid(),
+                unit_code: `U-${String(units.length + 1).padStart(2, '0')}`,
+                unit_type: 'house', x: nx, y: ny, width: nw, height: nh,
+              }
+              onChange([...units, newUnit])
+              onSelect(newUnit.id)
             }
-            onChange([...units, newUnit])
-            onSelect(newUnit.id)
           }
         }
         drawing.current = null
@@ -155,7 +163,7 @@ export default function MapCanvas({
     if (readOnly || e.button !== 0) return
     e.preventDefault()
     const { x, y } = svgCoords(e)
-    if (tool === 'draw') {
+    if (tool === 'draw' || tool === 'grid') {
       drawing.current = { startX: x, startY: y }
       setDraft({ x, y, w: 0, h: 0 })
       onSelect(null)
@@ -189,7 +197,7 @@ export default function MapCanvas({
         height={svgSize.h}
         style={{
           display: 'block',
-          cursor: tool === 'draw' ? 'crosshair' : tool === 'delete' ? 'not-allowed' : 'default',
+          cursor: (tool === 'draw' || tool === 'grid') ? 'crosshair' : tool === 'delete' ? 'not-allowed' : 'default',
           background: 'repeating-linear-gradient(0deg,transparent,transparent 23px,rgba(255,255,255,.02) 24px),repeating-linear-gradient(90deg,transparent,transparent 23px,rgba(255,255,255,.02) 24px)',
           userSelect: 'none',
         }}

@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback, use } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import MapCanvas, { CanvasUnit, UnitType } from '@/components/map/MapCanvas'
-
-type Tool = 'select' | 'draw' | 'delete'
+import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'spk' | 'supervisor'
 
 const UNIT_TYPES: { value: UnitType; label: string; icon: string }[] = [
@@ -45,6 +43,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null)
   const [detectCount, setDetectCount] = useState<number | null>(null)
   const [detectError, setDetectError] = useState<string | null>(null)
+  const [gridRect, setGridRect] = useState<GridRect | null>(null)
+  const [gridRows, setGridRows] = useState('2')
+  const [gridCols, setGridCols] = useState('10')
+  const [gridPrefix, setGridPrefix] = useState('A')
+  const [gridStart, setGridStart] = useState('1')
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
   const [unitCode, setUnitCode] = useState('')
@@ -95,6 +98,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save() }
       if (e.key === 'v') setTool('select')
       if (e.key === 'r') setTool('draw')
+      if (e.key === 'g') setTool('grid')
       if (e.key === 'd') setTool('delete')
       if (e.key === 'Escape') setSelectedId(null)
       if (e.key === 'Delete' && selectedId) {
@@ -152,6 +156,38 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     }
 
     setDigitizing(false)
+  }
+
+  function handleGridConfirm() {
+    if (!gridRect) return
+    const rows = Math.max(1, parseInt(gridRows) || 1)
+    const cols = Math.max(1, parseInt(gridCols) || 1)
+    const start = parseInt(gridStart) || 1
+    const prefix = gridPrefix.trim() || 'U'
+
+    const unitW = gridRect.width / cols
+    const unitH = gridRect.height / rows
+    const newUnits: CanvasUnit[] = []
+    let n = start
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        newUnits.push({
+          id: `grid_${Date.now()}_${r}_${c}`,
+          unit_code: `${prefix}-${String(n).padStart(2, '0')}`,
+          unit_type: 'house',
+          x: gridRect.x + c * unitW,
+          y: gridRect.y + r * unitH,
+          width: unitW,
+          height: unitH,
+        })
+        n++
+      }
+    }
+
+    setUnits(prev => [...prev, ...newUnits])
+    setGridRect(null)
+    setTool('select')
   }
 
   function addSub() {
@@ -222,6 +258,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           {([
             { t: 'select' as Tool, icon: '↖', tip: 'Pilih (V)' },
             { t: 'draw' as Tool, icon: '⬜', tip: 'Gambar (R)' },
+            { t: 'grid' as Tool, icon: '⊞', tip: 'Grid Blok (G)' },
             { t: 'delete' as Tool, icon: '🗑', tip: 'Hapus (D)' },
           ]).map(({ t, icon, tip }) => (
             <button key={t} onClick={() => setTool(t)} title={tip}
@@ -248,7 +285,70 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             selectedId={selectedId} onSelect={setSelectedId}
             tool={tool}
             bgImageUrl={bgImageUrl ?? undefined}
+            onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
+
+          {/* Block Grid config panel */}
+          {gridRect && (
+            <div className="absolute inset-0 flex items-center justify-center"
+              style={{ background: 'rgba(8,10,16,0.6)', backdropFilter: 'blur(2px)' }}>
+              <div className="rounded-xl p-5 w-72"
+                style={{ background: 'var(--bg-1)', border: '1px solid var(--border-md)' }}>
+                <h3 className="font-semibold text-sm mb-1" style={{ color: 'var(--t1)' }}>⊞ Buat Grid Blok</h3>
+                <p className="text-[11px] mb-4" style={{ color: 'var(--t3)' }}>
+                  Isi area yang digambar dengan grid unit berlabel otomatis
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Baris</label>
+                    <input type="number" min="1" max="50" value={gridRows}
+                      onChange={e => setGridRows(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Kolom</label>
+                    <input type="number" min="1" max="100" value={gridCols}
+                      onChange={e => setGridCols(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Prefiks (cth. F, G)</label>
+                    <input type="text" maxLength={5} value={gridPrefix}
+                      onChange={e => setGridPrefix(e.target.value.toUpperCase())}
+                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Mulai dari nomor</label>
+                    <input type="number" min="1" value={gridStart}
+                      onChange={e => setGridStart(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  </div>
+                </div>
+
+                <p className="text-[11px] mb-4 text-center" style={{ color: 'var(--accent-2)' }}>
+                  → {(parseInt(gridRows)||1) * (parseInt(gridCols)||1)} unit: {gridPrefix}-{String(parseInt(gridStart)||1).padStart(2,'0')} s/d {gridPrefix}-{String((parseInt(gridRows)||1)*(parseInt(gridCols)||1)+(parseInt(gridStart)||1)-1).padStart(2,'0')}
+                </p>
+
+                <div className="flex gap-2">
+                  <button onClick={() => setGridRect(null)}
+                    className="flex-1 py-2 rounded-lg text-xs font-medium"
+                    style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>
+                    Batal
+                  </button>
+                  <button onClick={handleGridConfirm}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold text-white"
+                    style={{ background: 'var(--accent)', boxShadow: '0 0 12px var(--accent-glow)' }}>
+                    Buat Grid
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Gemini loading overlay */}
           {digitizing && (

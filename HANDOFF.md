@@ -3,6 +3,78 @@
 
 ---
 
+## Session: Phase 2–6 — Map Studio, SPK, Field Flow, Review, PM Dashboard
+**Date:** June 2026
+**Status:** ✅ Complete — ready for Go Live + Phase 7 hardening
+
+### What was built
+
+**Phase 2 — Map Studio**
+- `app/projects/new/page.tsx` — create project form
+- `app/projects/[id]/map/page.tsx` — full Map Studio (draw, configure, save, AI digitize)
+- `components/map/MapCanvas.tsx` — SVG canvas with draw/select/drag/delete tools
+- `app/api/v1/projects/route.ts` — project CRUD
+- `app/api/v1/projects/[id]/map/save/route.ts` — save canvas_data to Supabase
+- `app/api/v1/projects/[id]/map/digitize/route.ts` — Gemini 2.5 Flash digitization with fallback chain
+- Dashboard updated with real project list + create button
+
+**Phase 3 — SPK Template Builder**
+- `app/spk/page.tsx` — template list
+- `app/spk/new/page.tsx` — builder: stages, subtasks, photo-required toggle, AI synthesis stub
+- `app/api/v1/spk/route.ts` — template CRUD
+
+**Phase 4 — Pengawas Mobile Flow**
+- `app/lapangan/page.tsx` — assigned units list (Indonesian)
+- `app/lapangan/unit/[unit_id]/page.tsx` — stage checklist, photo capture, submit
+- `app/api/v1/lapangan/units/route.ts` — assigned units for current user
+- `app/api/v1/lapangan/units/[unit_id]/route.ts` — unit detail with SPK stages
+- `app/api/v1/units/[unit_id]/submissions/route.ts` — submission POST
+
+**Phase 5 — Koordinator Review Queue**
+- `app/review/page.tsx` — split-panel queue sorted by urgency, approve/deny with reason
+- `app/api/v1/review/queue/route.ts` — pending submissions sorted by urgency
+- `app/api/v1/submissions/[id]/review/route.ts` — approve/deny + Telegram stub
+
+**Phase 6 — PM Progress Map**
+- `app/projects/[id]/page.tsx` — live progress map, KPI strip, filters, unit detail panel
+- `app/api/v1/units/[unit_id]/route.ts` — unit detail with submission history
+
+**Infrastructure**
+- `lib/api/auth.ts` — `requireAuth()` + `requireRole()` helpers used by all API routes
+- `lib/api/response.ts` — `ok()`, `created()`, `err()` response helpers
+- `proxy.ts` — renamed from middleware.ts (Next.js 16 requirement)
+- `DECISIONS.md` — architecture decision log (14 entries)
+- `app/globals.css` — `.card-hover` CSS class added
+
+### What is stubbed / not yet real
+
+| Feature | Status |
+|---|---|
+| Go Live | Button exists but does NOT populate `units` table from canvas — **build this next** |
+| R2 photo uploads | Presign endpoint not built — UI captures photos but doesn't upload |
+| Telegram notifications | Stub only — fires `console.log`, needs bot token + `project_notifications` row |
+| QR code per unit | Not built |
+| Offline mode (IndexedDB) | Not built |
+| PWA manifest | Not built |
+| Role-based navigation | All roles see same layout — role-aware nav not built |
+| User onboarding | No sign-up flow — users created via Supabase dashboard + SQL |
+
+### Credentials (all in .env.local — gitignored)
+- Supabase: `oofxnbpsncixbepvjimg`
+- Cloudflare R2: `pantau` bucket, Account ID `94e419b0c3bf8c318fdd1fce03a42d7a`
+- Gemini API key: set, billing enabled
+- Test user: `admin@ptmitraadi.com` / `Pantau#2024!`, org: PT Mitra Adi Properti, role: owner
+
+### Next priority: Go Live
+When PM clicks "Go Live" on a project, it must:
+1. Set `projects.status = 'active'` and `go_live_at = now()`
+2. Read `canvas_data.units` from the project
+3. INSERT each unit into the `units` table with normalized coordinates
+4. Return the created unit IDs so QR codes can be generated later
+Without this, Pengawas have nothing to submit against — the whole field workflow is blocked.
+
+---
+
 ## Session: Phase 1 — Supabase Foundation + Auth + Security Review
 **Date:** June 2026
 **Status:** ✅ Complete — ready for Phase 2

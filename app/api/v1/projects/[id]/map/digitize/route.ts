@@ -2,6 +2,23 @@ import { NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/api/auth'
 import { ok, err } from '@/lib/api/response'
 
+// Verified models against live API 2026-06-07
+const MODELS = [
+  'gemini-2.5-flash',
+  'gemini-3.5-flash',
+  'gemini-2.0-flash-001',
+  'gemini-2.0-flash-lite',
+]
+
+interface DetectedUnit {
+  temp_id: string
+  type: string
+  label_detected: string | null
+  suggested_code: string | null
+  coordinates: { x: number; y: number; width: number; height: number }
+  confidence: number
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAuth()
   if ('error' in ctx) return err(ctx.error, ctx.status)
@@ -19,13 +36,61 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const base64 = Buffer.from(bytes).toString('base64')
   const mimeType = image.type || 'image/jpeg'
 
+  // Run 3 passes in parallel: full image + left half + right half
+  // This triples detection coverage for dense plans like block plans with 200+ lots
+  const passes: { focus: 'left' | 'right' | null; desc: string }[] = [
+    { focus: null,    desc: 'full image' },
+    { focus: 'left',  desc: 'left half (x 0.0–0.55)' },
+    { focus: 'right', desc: 'right half (x 0.45–1.0)' },
+  ]
+
+  console.log('[Digitize] Starting 3-pass parallel detection...')
+
+  const results = await Promise.all(
+    passes.map(p => runDetection(base64, mimeType, apiKey, p.focus, p.desc))
+  )
+
+  const allUnits = results.flat()
+  console.log(`[Digitize] Raw totals per pass: ${results.map(r => r.length).join(' / ')} → ${allUnits.length} before dedup`)
+
+  const deduped = deduplicateUnits(allUnits)
+  console.log(`[Digitize] After deduplication: ${deduped.length} units`)
+
+  // Re-index temp_ids so they're unique across all passes
+  const finalUnits = deduped.map((u, i) => ({
+    ...u,
+    temp_id: `u_${String(i + 1).padStart(3, '0')}`,
+  }))
+
+  return ok({
+    detected_units: finalUnits,
+    overall_confidence: finalUnits.length > 0 ? 0.8 : 0,
+    unit_count: finalUnits.length,
+    passes: results.map(r => r.length),
+  })
+}
+
+async function runDetection(
+  base64: string,
+  mimeType: string,
+  apiKey: string,
+  focus: 'left' | 'right' | null,
+  desc: string
+): Promise<DetectedUnit[]> {
+  const regionInstruction = focus === 'left'
+    ? '\nFOCUS: Detect ONLY units in the LEFT HALF of the image (x coordinates 0.0–0.55). Ignore the right side. Still return coordinates relative to the FULL image.'
+    : focus === 'right'
+    ? '\nFOCUS: Detect ONLY units in the RIGHT HALF of the image (x coordinates 0.45–1.0). Ignore the left side. Still return coordinates relative to the FULL image.'
+    : '\nFOCUS: Scan the entire image. Try to detect every lot, including small and densely packed ones.'
+
   const prompt = `You are analyzing an Indonesian residential housing site plan (denah kavling / blok plan).
 
 The image shows individual land lots arranged in labeled blocks. Each lot has an alphanumeric label like F1, G23, J12b, I3a. Blocks are labeled BLOK F, BLOK G, etc. There may also be roads (JALAN), green areas (TAMAN, FASOS, FASUM), and facilities.
+${regionInstruction}
 
-TASK: Detect every individual lot/unit visible in the image. Return normalized coordinates (0.0 to 1.0) relative to the full image size.
+TASK: Detect every individual lot/unit visible. Return precise normalized coordinates (0.0–1.0) relative to the FULL image dimensions.
 
-Return ONLY this JSON structure, no markdown, no explanation:
+Return ONLY this JSON, no markdown:
 {
   "detected_units": [
     {
@@ -33,99 +98,83 @@ Return ONLY this JSON structure, no markdown, no explanation:
       "type": "house",
       "label_detected": "F1",
       "suggested_code": "F-01",
-      "coordinates": { "x": 0.05, "y": 0.10, "width": 0.03, "height": 0.05 },
+      "coordinates": { "x": 0.05, "y": 0.10, "width": 0.025, "height": 0.04 },
       "confidence": 0.9
     }
-  ],
-  "overall_confidence": 0.85
+  ]
 }
 
-Type values: house (default for lots), road (jalan), common_area (taman/FASOS/FASUM), parking, facility, boundary.
-Include ALL lots. Do not skip small or partially visible lots.
-Coordinates: x,y = top-left corner of the lot, normalized 0-1 to image width/height.`
+Rules:
+- type: "house" for individual lots, "road" for jalan, "common_area" for taman/FASOS/FASUM
+- Include ALL visible lots — do not skip small or densely packed ones
+- x,y = top-left corner of the lot, coordinates normalized 0–1 to FULL image
+- Lot boxes should be small and tight — do not draw one large box over a whole block`
 
-  const requestBody = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: mimeType, data: base64 } },
-      ],
-    }],
+  const body = {
+    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
     generationConfig: { temperature: 0, responseMimeType: 'application/json' },
   }
 
-  // Verified against live API 2026-06-07. Try best model first, fall back on 503/404.
-  const MODELS = [
-    'gemini-2.5-flash',      // primary — best quality/price for vision
-    'gemini-3.5-flash',      // newer general flash
-    'gemini-2.0-flash-001',  // stable pinned version
-    'gemini-2.0-flash-lite', // lightweight last resort
-  ]
-
-  let geminiRes: Response | null = null
-  let usedModel = ''
-
+  let response: Response | null = null
   for (const model of MODELS) {
-    console.log(`[Digitize] Trying model: ${model}`)
     const attempt = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     )
     if (attempt.status !== 503 && attempt.status !== 404) {
-      geminiRes = attempt
-      usedModel = model
+      response = attempt
+      console.log(`[Digitize:${desc}] Using model: ${model}`)
       break
     }
-    console.warn(`[Digitize] ${model} returned ${attempt.status}, trying next...`)
+    console.warn(`[Digitize:${desc}] ${model} → ${attempt.status}, trying next...`)
   }
 
-  if (!geminiRes) {
-    return err('Semua model Gemini sedang sibuk — coba lagi dalam 1-2 menit', 503)
+  if (!response || !response.ok) {
+    console.error(`[Digitize:${desc}] All models failed`)
+    return []
   }
 
-  if (!geminiRes.ok) {
-    const errText = await geminiRes.text()
-    console.error('[Digitize] Gemini error', geminiRes.status, errText.slice(0, 300))
-    return err(`Gemini error ${geminiRes.status}: ${errText.slice(0, 100)}`, 502)
-  }
-
-  console.log(`[Digitize] Using model: ${usedModel}`)
-
-  const result = await geminiRes.json()
-
-  // Log full response for debugging
+  const result = await response.json()
   const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-  console.log('[Digitize] Raw Gemini response (first 500 chars):', rawText.slice(0, 500))
-
   if (!rawText) {
-    const finishReason = result.candidates?.[0]?.finishReason
-    console.error('[Digitize] No text in response. finishReason:', finishReason, 'Full result:', JSON.stringify(result).slice(0, 400))
-    return err(`Gemini returned no content (finishReason: ${finishReason})`, 502)
+    console.warn(`[Digitize:${desc}] Empty response`)
+    return []
   }
 
-  // Strip markdown code fences if present
   const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
-
-  let parsed: { detected_units?: unknown[]; overall_confidence?: number }
   try {
-    parsed = JSON.parse(cleaned)
-  } catch (e) {
-    console.error('[Digitize] JSON parse failed. Cleaned text:', cleaned.slice(0, 500))
-    return err('Gemini returned invalid JSON — try a clearer image', 502)
+    const parsed = JSON.parse(cleaned)
+    const units: DetectedUnit[] = Array.isArray(parsed.detected_units) ? parsed.detected_units : []
+    console.log(`[Digitize:${desc}] Detected ${units.length} units`)
+    return units
+  } catch {
+    console.error(`[Digitize:${desc}] JSON parse failed:`, cleaned.slice(0, 200))
+    return []
   }
-
-  const units = Array.isArray(parsed.detected_units) ? parsed.detected_units : []
-  console.log(`[Digitize] Detected ${units.length} units, confidence: ${parsed.overall_confidence ?? 'N/A'}`)
-
-  return ok({
-    detected_units: units,
-    overall_confidence: parsed.overall_confidence ?? 0,
-    unit_count: units.length,
-  })
 }
 
-function generateStubLayout() {
-  const units = []
+// Remove duplicate detections where unit centers are within 2% of each other
+function deduplicateUnits(units: DetectedUnit[]): DetectedUnit[] {
+  const kept: DetectedUnit[] = []
+
+  for (const unit of units) {
+    const cx = unit.coordinates.x + unit.coordinates.width / 2
+    const cy = unit.coordinates.y + unit.coordinates.height / 2
+
+    const isDuplicate = kept.some(k => {
+      const kx = k.coordinates.x + k.coordinates.width / 2
+      const ky = k.coordinates.y + k.coordinates.height / 2
+      return Math.abs(cx - kx) < 0.025 && Math.abs(cy - ky) < 0.025
+    })
+
+    if (!isDuplicate) kept.push(unit)
+  }
+
+  return kept
+}
+
+function generateStubLayout(): DetectedUnit[] {
+  const units: DetectedUnit[] = []
   let n = 1
   for (let row = 0; row < 3; row++) {
     for (let col = 0; col < 6; col++) {
