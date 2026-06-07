@@ -253,28 +253,31 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left toolbar */}
-        <div className="w-12 flex flex-col items-center py-3 gap-1 flex-shrink-0"
+        <div className="w-16 flex flex-col items-center py-3 gap-1 flex-shrink-0"
           style={{ background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}>
           {([
-            { t: 'select' as Tool, icon: '↖', tip: 'Pilih (V)' },
-            { t: 'draw' as Tool, icon: '⬜', tip: 'Gambar (R)' },
-            { t: 'grid' as Tool, icon: '⊞', tip: 'Grid Blok (G)' },
-            { t: 'delete' as Tool, icon: '🗑', tip: 'Hapus (D)' },
-          ]).map(({ t, icon, tip }) => (
+            { t: 'select' as Tool, icon: '↖', label: 'Pilih',  tip: 'Pilih & geser (V)' },
+            { t: 'draw'   as Tool, icon: '✏️', label: 'Gambar', tip: 'Gambar unit (R)' },
+            { t: 'grid'   as Tool, icon: '▦',  label: 'Grid',   tip: 'Grid blok otomatis (G)' },
+            { t: 'delete' as Tool, icon: '🗑',  label: 'Hapus',  tip: 'Hapus unit (D)' },
+          ]).map(({ t, icon, label, tip }) => (
             <button key={t} onClick={() => setTool(t)} title={tip}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[15px] transition-all"
+              className="w-14 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
               style={{
                 background: tool === t ? 'var(--accent-sub)' : 'transparent',
                 border: tool === t ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
                 color: tool === t ? 'var(--accent-2)' : 'var(--t3)',
               }}>
-              {icon}
+              <span className="text-[16px] leading-none">{icon}</span>
+              <span className="text-[9px] font-medium leading-none">{label}</span>
             </button>
           ))}
-          <div className="w-6 h-px my-1" style={{ background: 'var(--border)' }} />
-          <div className="text-center" style={{ color: 'var(--t3)' }}>
-            <div className="text-[10px] mb-1">{units.length}</div>
-            <div className="text-[8px]">unit</div>
+
+          <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
+
+          <div className="text-center px-1">
+            <div className="text-[13px] font-bold" style={{ color: 'var(--t1)' }}>{units.length}</div>
+            <div className="text-[8px]" style={{ color: 'var(--t3)' }}>unit</div>
           </div>
         </div>
 
@@ -347,6 +350,14 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Grid tool hint */}
+          {tool === 'grid' && !gridRect && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-[12px] font-medium pointer-events-none"
+              style={{ background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: 'var(--accent-2)', backdropFilter: 'blur(8px)' }}>
+              ▦ Klik dan seret di atas area blok untuk membuat grid unit otomatis
             </div>
           )}
 

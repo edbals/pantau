@@ -56,8 +56,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const deduped = deduplicateUnits(allUnits)
   console.log(`[Digitize] After deduplication: ${deduped.length} units`)
 
+  const cleaned = removeGhosts(deduped)
+  console.log(`[Digitize] After ghost removal: ${cleaned.length} units (removed ${deduped.length - cleaned.length} ghosts)`)
+
   // Re-index temp_ids so they're unique across all passes
-  const finalUnits = deduped.map((u, i) => ({
+  const finalUnits = cleaned.map((u, i) => ({
     ...u,
     temp_id: `u_${String(i + 1).padStart(3, '0')}`,
   }))
@@ -156,21 +159,60 @@ Rules:
 // Remove duplicate detections where unit centers are within 2% of each other
 function deduplicateUnits(units: DetectedUnit[]): DetectedUnit[] {
   const kept: DetectedUnit[] = []
-
   for (const unit of units) {
     const cx = unit.coordinates.x + unit.coordinates.width / 2
     const cy = unit.coordinates.y + unit.coordinates.height / 2
-
     const isDuplicate = kept.some(k => {
       const kx = k.coordinates.x + k.coordinates.width / 2
       const ky = k.coordinates.y + k.coordinates.height / 2
       return Math.abs(cx - kx) < 0.025 && Math.abs(cy - ky) < 0.025
     })
-
     if (!isDuplicate) kept.push(unit)
   }
-
   return kept
+}
+
+// Remove ghost units — dimension annotations, scale bars, compass roses etc.
+// that Gemini mistakes for lots. Uses two filters:
+// 1. Minimum size: tiny rectangles are almost never real lots
+// 2. Spatial outliers: units far from the main cluster are hallucinations
+function removeGhosts(units: DetectedUnit[]): DetectedUnit[] {
+  if (units.length < 4) return units
+
+  // Filter 1: drop units smaller than 0.05% of image area
+  // Real lots on a typical site plan are at least 1–2% wide × 1–2% tall
+  const sizeFiltered = units.filter(u =>
+    u.coordinates.width * u.coordinates.height >= 0.0005
+  )
+
+  if (sizeFiltered.length < 4) return sizeFiltered
+
+  // Filter 2: Median Absolute Deviation — robust against outliers
+  // (unlike std deviation, a few ghost points don't skew the result)
+  const cx = sizeFiltered.map(u => u.coordinates.x + u.coordinates.width / 2)
+  const cy = sizeFiltered.map(u => u.coordinates.y + u.coordinates.height / 2)
+
+  const medX = median(cx)
+  const medY = median(cy)
+  const madX = median(cx.map(x => Math.abs(x - medX)))
+  const madY = median(cy.map(y => Math.abs(y - medY)))
+
+  // Keep units within 3× MAD from median (covers ~99% of a normal cluster)
+  // Minimum threshold of 0.15 prevents over-filtering on small plans
+  const threshX = Math.max(madX * 3, 0.15)
+  const threshY = Math.max(madY * 3, 0.15)
+
+  return sizeFiltered.filter(u => {
+    const x = u.coordinates.x + u.coordinates.width / 2
+    const y = u.coordinates.y + u.coordinates.height / 2
+    return Math.abs(x - medX) <= threshX && Math.abs(y - medY) <= threshY
+  })
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
 function generateStubLayout(): DetectedUnit[] {
