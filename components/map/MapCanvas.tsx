@@ -223,24 +223,26 @@ export default function MapCanvas({
           const ph = u.height * svgSize.h
           const style = TYPE_STYLE[u.unit_type] ?? TYPE_STYLE.house
           const isSelected = u.id === selectedId
+          // Fill: progress color in PM view, otherwise plain type fill (subcon shown as bottom line, not fill)
           const fillColor = showProgress && u.progress_pct !== undefined
             ? progressColor(u.progress_pct)
-            : (u.subcontractor_color ? u.subcontractor_color + '33' : style.fill)
+            : style.fill
 
           return (
             <g key={u.id}
               style={{ cursor: readOnly ? 'pointer' : tool === 'delete' ? 'not-allowed' : tool === 'select' ? 'move' : 'default' }}
               onMouseDown={e => handleUnitMouseDown(e, u.id)}>
 
+              {/* Unit body */}
               <rect x={px} y={py} width={pw} height={ph}
                 fill={fillColor}
-                stroke={u.subcontractor_color ?? style.stroke}
+                stroke={isSelected ? 'var(--accent)' : style.stroke}
                 strokeWidth={isSelected ? 2.5 : 1.5}
                 strokeDasharray={style.dash}
                 rx={2}
               />
 
-              {/* Progress fill */}
+              {/* Progress fill overlay (PM view) */}
               {showProgress && u.progress_pct !== undefined && u.progress_pct > 0 && (
                 <rect x={px + 1} y={py + ph - (ph * u.progress_pct / 100) + 1}
                   width={pw - 2} height={(ph * u.progress_pct / 100) - 2}
@@ -248,7 +250,43 @@ export default function MapCanvas({
                   style={{ pointerEvents: 'none' }} />
               )}
 
-              {/* Selection handles */}
+              {/* TOP LINE — urgency indicator
+                  amber = high priority, red = critical
+                  Spans full width so it reads as a band when scanning the map */}
+              {u.urgency && u.urgency !== 'normal' && (
+                <>
+                  {u.urgency === 'critical' && (
+                    <rect x={px} y={py} width={pw} height={4}
+                      fill="#EF4444" opacity={0.9} rx={2}
+                      style={{ pointerEvents: 'none' }} />
+                  )}
+                  {u.urgency === 'high' && (
+                    <rect x={px} y={py} width={pw} height={3}
+                      fill="#F59E0B" opacity={0.85} rx={2}
+                      style={{ pointerEvents: 'none' }} />
+                  )}
+                </>
+              )}
+
+              {/* LEFT LINE — pending review indicator
+                  Thin amber stripe on the left edge */}
+              {u.status === 'pending_review' && (
+                <rect x={px} y={py + 4} width={3} height={ph - 8}
+                  fill="#F59E0B" opacity={0.9} rx={1}
+                  style={{ pointerEvents: 'none' }} />
+              )}
+
+              {/* BOTTOM LINE — subcontractor assignment
+                  4px colored band at the bottom edge.
+                  Adjacent units with the same subcon visually merge
+                  into a continuous strip — the "region" effect. */}
+              {u.subcontractor_color && (
+                <rect x={px} y={py + ph - 4} width={pw} height={4}
+                  fill={u.subcontractor_color} rx={2}
+                  style={{ pointerEvents: 'none' }} />
+              )}
+
+              {/* Selection corner handles */}
               {isSelected && !readOnly && (
                 <>
                   {[{ cx: px, cy: py }, { cx: px + pw, cy: py }, { cx: px, cy: py + ph }, { cx: px + pw, cy: py + ph }].map((h, i) => (
@@ -259,7 +297,7 @@ export default function MapCanvas({
                 </>
               )}
 
-              {/* Label */}
+              {/* Unit label */}
               {pw > 24 && ph > 16 && (
                 <text x={px + pw / 2} y={py + ph / 2 + 4}
                   textAnchor="middle"
@@ -269,20 +307,6 @@ export default function MapCanvas({
                   style={{ pointerEvents: 'none' }}>
                   {u.label ?? u.unit_code}
                 </text>
-              )}
-
-              {/* Urgency dot */}
-              {u.urgency && u.urgency !== 'normal' && (
-                <circle cx={px + pw - 6} cy={py + 6} r={4}
-                  fill={u.urgency === 'critical' ? 'var(--red)' : 'var(--amber)'}
-                  style={{ pointerEvents: 'none' }} />
-              )}
-
-              {/* Pending review dot */}
-              {u.status === 'pending_review' && (
-                <circle cx={px + 6} cy={py + 6} r={4}
-                  fill="var(--amber)" opacity={0.9}
-                  style={{ pointerEvents: 'none' }} />
               )}
             </g>
           )

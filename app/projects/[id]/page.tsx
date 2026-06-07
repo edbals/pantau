@@ -167,21 +167,48 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-4 px-4 py-2 flex-shrink-0"
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 py-2 flex-shrink-0"
             style={{ background: 'var(--bg-1)', borderTop: '1px solid var(--border)' }}>
-            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t3)' }}>Legenda:</span>
-            {[
-              { color: 'rgba(156,163,175,0.4)', label: '1–24%' },
-              { color: 'rgba(45,212,191,0.35)', label: '25–49%' },
-              { color: 'rgba(20,184,166,0.5)', label: '50–74%' },
-              { color: 'rgba(13,148,136,0.6)', label: '75–99%' },
-              { color: 'rgba(16,185,129,0.7)', label: '100%' },
-            ].map(l => (
-              <div key={l.label} className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm" style={{ background: l.color, border: '1px solid rgba(255,255,255,0.1)' }} />
-                <span className="text-[10px]" style={{ color: 'var(--t3)' }}>{l.label}</span>
+
+            {/* Progress fill */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t3)' }}>Progres:</span>
+              {[
+                { color: 'rgba(156,163,175,0.4)', label: '1–24%' },
+                { color: 'rgba(45,212,191,0.35)', label: '25–49%' },
+                { color: 'rgba(20,184,166,0.5)', label: '50–74%' },
+                { color: 'rgba(13,148,136,0.6)', label: '75–99%' },
+                { color: 'rgba(16,185,129,0.7)', label: '100%' },
+              ].map(l => (
+                <div key={l.label} className="flex items-center gap-1">
+                  <span className="w-3 h-3 rounded-sm" style={{ background: l.color, border: '1px solid rgba(255,255,255,0.08)' }} />
+                  <span className="text-[10px]" style={{ color: 'var(--t3)' }}>{l.label}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="w-px h-3" style={{ background: 'var(--border-md)' }} />
+
+            {/* Top line = urgency */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t3)' }}>Urgensi (atas):</span>
+              <div className="flex items-center gap-1">
+                <span className="w-5 h-[3px] rounded-full inline-block" style={{ background: '#F59E0B' }} />
+                <span className="text-[10px]" style={{ color: 'var(--t3)' }}>Tinggi</span>
               </div>
-            ))}
+              <div className="flex items-center gap-1">
+                <span className="w-5 h-[4px] rounded-full inline-block" style={{ background: '#EF4444' }} />
+                <span className="text-[10px]" style={{ color: 'var(--t3)' }}>Kritis</span>
+              </div>
+            </div>
+
+            <div className="w-px h-3" style={{ background: 'var(--border-md)' }} />
+
+            {/* Bottom line = subcon */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t3)' }}>Subkon (bawah):</span>
+              <span className="text-[10px]" style={{ color: 'var(--t3)' }}>warna sesuai subkontraktor</span>
+            </div>
           </div>
         </div>
 
