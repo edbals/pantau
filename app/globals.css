@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base:     #080A10;
+  --bg-1:        #0F1117;
+  --bg-2:        #161925;
+  --bg-3:        #1E2233;
+  --bg-hover:    #242740;
+  --border:      rgba(255, 255, 255, 0.06);
+  --border-md:   rgba(255, 255, 255, 0.10);
+  --border-lg:   rgba(255, 255, 255, 0.16);
+  --accent:      #7C3AED;
+  --accent-2:    #9F67FF;
+  --accent-glow: rgba(124, 58, 237, 0.25);
+  --accent-sub:  rgba(124, 58, 237, 0.12);
+  --t1:          #F0F4FF;
+  --t2:          #8892B0;
+  --t3:          #4A5270;
+  --green:       #10B981;
+  --amber:       #F59E0B;
+  --red:         #EF4444;
+  --blue:        #3B82F6;
+  --r:           10px;
+  --r-sm:        6px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--t1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Thin, dark scrollbar matching the design system */
+::-webkit-scrollbar          { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb    { background: var(--bg-3); border-radius: 4px; }
+::-webkit-scrollbar-track    { background: transparent; }

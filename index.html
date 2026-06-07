@@ -1,0 +1,1800 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Pantau — Platform Manajemen Konstruksi</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-base:    #080A10;
+  --bg-1:       #0F1117;
+  --bg-2:       #161925;
+  --bg-3:       #1E2233;
+  --bg-hover:   #242740;
+  --border:     rgba(255,255,255,0.06);
+  --border-md:  rgba(255,255,255,0.10);
+  --border-lg:  rgba(255,255,255,0.16);
+  --accent:     #7C3AED;
+  --accent-2:   #9F67FF;
+  --accent-glow:rgba(124,58,237,0.25);
+  --accent-sub: rgba(124,58,237,0.12);
+  --t1:         #F0F4FF;
+  --t2:         #8892B0;
+  --t3:         #4A5270;
+  --green:      #10B981;
+  --amber:      #F59E0B;
+  --red:        #EF4444;
+  --blue:       #3B82F6;
+  --r: 10px;
+  --r-sm: 6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg-base);color:var(--t1);font-family:'Inter',sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;border:none;background:none;font-family:inherit;font-size:inherit}
+input,select,textarea{font-family:inherit;font-size:inherit}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ── NAV ── */
+.app-nav{position:fixed;top:0;left:0;right:0;height:52px;background:var(--bg-1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px;z-index:100}
+.nav-brand{display:flex;align-items:center;gap:8px;margin-right:4px}
+.nav-logo-mark{width:28px;height:28px;background:var(--accent);border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;box-shadow:0 0 12px var(--accent-glow)}
+.nav-name{font-weight:700;font-size:15px;letter-spacing:-0.3px}
+.demo-pill{font-size:9px;font-weight:700;letter-spacing:0.08em;color:var(--t3);background:var(--bg-3);padding:2px 6px;border-radius:20px;border:1px solid var(--border-md)}
+.view-toggle{display:flex;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:3px;gap:2px}
+.vt-btn{padding:5px 14px;border-radius:5px;font-size:12px;font-weight:500;color:var(--t2);transition:all .15s}
+.vt-btn.active{background:var(--accent);color:#fff;box-shadow:0 0 10px var(--accent-glow)}
+.nav-spacer{flex:1}
+.nav-ctx{font-size:12px;color:var(--t3);display:flex;align-items:center;gap:8px}
+
+/* ── SHELL ── */
+.app-shell{display:flex;height:100vh;padding-top:52px}
+.left-rail{width:52px;flex-shrink:0;background:var(--bg-1);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px}
+.rail-btn{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--t3);transition:all .15s;position:relative}
+.rail-btn:hover{background:var(--bg-2);color:var(--t2)}
+.rail-btn.active{background:var(--accent-sub);color:var(--accent-2);box-shadow:inset 0 0 0 1px rgba(124,58,237,0.25)}
+.rail-btn svg{width:18px;height:18px}
+.rail-divider{width:24px;height:1px;background:var(--border);margin:4px 0}
+.main-area{flex:1;overflow:hidden;display:flex;flex-direction:column}
+
+/* ── CARDS ── */
+.card{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.card-hover:hover{border-color:var(--border-md);background:var(--bg-2);transform:translateY(-1px);transition:all .15s}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font-weight:500;font-size:13px;transition:all .15s;cursor:pointer}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 0 12px var(--accent-glow)}
+.btn-primary:hover{background:var(--accent-2)}
+.btn-ghost{background:transparent;color:var(--t2);border:1px solid var(--border-md)}
+.btn-ghost:hover{background:var(--bg-3);border-color:var(--border-lg);color:var(--t1)}
+.btn-danger{background:rgba(239,68,68,0.1);color:var(--red);border:1px solid rgba(239,68,68,0.25)}
+.btn-success{background:rgba(16,185,129,0.1);color:var(--green);border:1px solid rgba(16,185,129,0.25)}
+
+/* ── BADGES ── */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;letter-spacing:.01em}
+.badge-green{background:rgba(16,185,129,0.12);color:var(--green);border:1px solid rgba(16,185,129,0.2)}
+.badge-amber{background:rgba(245,158,11,0.12);color:var(--amber);border:1px solid rgba(245,158,11,0.2)}
+.badge-red{background:rgba(239,68,68,0.12);color:var(--red);border:1px solid rgba(239,68,68,0.2)}
+.badge-purple{background:var(--accent-sub);color:var(--accent-2);border:1px solid rgba(124,58,237,0.25)}
+.badge-gray{background:var(--bg-3);color:var(--t2);border:1px solid var(--border-md)}
+
+/* ── PROGRESS BAR ── */
+.pbar{height:4px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.pbar-fill{height:100%;border-radius:2px;background:var(--accent);transition:width .4s ease}
+.pbar-fill.green{background:var(--green)}
+.pbar-fill.amber{background:var(--amber)}
+
+/* ── CANVAS ── */
+.canvas-wrap{background:repeating-linear-gradient(0deg,transparent,transparent 23px,rgba(255,255,255,.025) 24px),repeating-linear-gradient(90deg,transparent,transparent 23px,rgba(255,255,255,.025) 24px);border-radius:var(--r);overflow:hidden;border:1px solid var(--border)}
+.block-group{cursor:pointer;transition:opacity .1s}
+.block-group:hover rect{filter:brightness(1.15)}
+
+/* ── SIDEBAR PANEL ── */
+.side-panel{width:280px;flex-shrink:0;background:var(--bg-1);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.right-panel{width:320px;flex-shrink:0;background:var(--bg-1);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.panel-section{padding:14px;border-bottom:1px solid var(--border)}
+.panel-label{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--t3);text-transform:uppercase;margin-bottom:8px}
+
+/* ── TABS ── */
+.tab-bar{display:flex;gap:2px;background:var(--bg-2);border-radius:7px;padding:3px}
+.tab-item{flex:1;padding:5px 8px;border-radius:5px;text-align:center;font-size:11px;font-weight:500;color:var(--t3);cursor:pointer;transition:all .15s}
+.tab-item.active{background:var(--accent-sub);color:var(--accent-2);border:1px solid rgba(124,58,237,.2)}
+
+/* ── STAGE ACCORDION ── */
+.stage-item{border-bottom:1px solid var(--border)}
+.stage-header{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .1s}
+.stage-header:hover{background:var(--bg-2)}
+.stage-num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+.stage-body{background:var(--bg-2);padding:10px 14px;display:none}
+.stage-body.open{display:block}
+.subtask-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
+.subtask-row:last-child{border-bottom:none}
+.check-box{width:16px;height:16px;border-radius:3px;border:1px solid var(--border-md);flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:1px;transition:all .15s}
+.check-box.done{background:var(--green);border-color:var(--green)}
+.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px}
+.photo-thumb{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:4px;border:1px solid var(--border)}
+
+/* ── FIELD VIEW ── */
+.field-wrap{flex:1;display:flex;align-items:center;justify-content:center;background:var(--bg-base);padding:24px}
+.phone-frame{width:375px;height:720px;background:var(--bg-1);border-radius:42px;overflow:hidden;border:7px solid var(--bg-3);box-shadow:0 0 0 1px var(--border),0 0 80px var(--accent-glow),0 24px 60px rgba(0,0,0,.6);flex-shrink:0;position:relative;display:flex;flex-direction:column}
+.phone-status{height:44px;background:var(--bg-1);display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 8px;flex-shrink:0}
+.phone-screen{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.phone-screen::-webkit-scrollbar{display:none}
+
+/* Field components */
+.field-header{padding:12px 16px;display:flex;align-items:center;gap:10px;background:var(--bg-1);border-bottom:1px solid var(--border);flex-shrink:0}
+.field-back{width:32px;height:32px;border-radius:50%;background:var(--bg-2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.field-content{flex:1;overflow-y:auto;padding:14px}
+.field-content::-webkit-scrollbar{display:none}
+.field-bottom{padding:14px;border-top:1px solid var(--border);background:var(--bg-1);flex-shrink:0}
+
+/* Unit card - field */
+.unit-card-f{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .15s}
+.unit-card-f:hover{background:var(--bg-3);border-color:var(--border-md)}
+.unit-code-tag{width:46px;height:46px;border-radius:8px;background:var(--bg-3);border:1px solid var(--border-md);display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0}
+.unit-code-big{font-weight:700;font-size:13px}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* Subtask - field */
+.subtask-f{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px}
+.subtask-f.active-task{border-color:rgba(124,58,237,0.35);background:rgba(124,58,237,0.05)}
+.subtask-f.done-task{opacity:0.7}
+.check-circle{width:22px;height:22px;border-radius:50%;border:2px solid var(--border-md);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.check-circle.done{background:var(--green);border-color:var(--green);box-shadow:0 0 8px rgba(16,185,129,.3)}
+.photo-upload-area{border:1px dashed var(--border-md);border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;transition:all .15s;background:var(--bg-base)}
+.photo-upload-area:hover{border-color:var(--accent-2);background:var(--accent-sub)}
+.mini-photo{width:44px;height:44px;border-radius:5px;object-fit:cover;border:1px solid var(--border-md)}
+
+/* Big action button */
+.field-action-btn{width:100%;padding:14px;border-radius:var(--r);font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .15s}
+.field-action-btn.primary{background:var(--accent);color:#fff;box-shadow:0 0 20px var(--accent-glow)}
+.field-action-btn.primary:hover{background:var(--accent-2)}
+.field-action-btn.disabled{background:var(--bg-3);color:var(--t3);pointer-events:none}
+
+/* ── ANIMATIONS ── */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin 1s linear infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+.pulse-dot{animation:pulse 1.8s infinite}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .2s ease}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.slide-up{animation:slideUp .25s ease}
+.toast-item{animation:slideUp .2s ease}
+
+/* ── TOAST ── */
+#toast-container{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:6px}
+.toast-item{background:var(--bg-3);border:1px solid var(--border-md);color:var(--t1);font-size:13px;padding:10px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);max-width:300px}
+
+/* ── INPUTS ── */
+.inp{width:100%;background:var(--bg-2);border:1px solid var(--border-md);border-radius:var(--r-sm);padding:8px 10px;color:var(--t1);outline:none;transition:border .15s}
+.inp:focus{border-color:var(--accent)}
+.inp::placeholder{color:var(--t3)}
+.sel{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234A5270'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+
+/* ── SCROLLABLE ── */
+.scroll{overflow-y:auto}
+
+/* Utility */
+.flex{display:flex}.flex-col{flex-direction:column}.items-center{align-items:center}.justify-between{justify-content:space-between}.gap-2{gap:8px}.gap-3{gap:12px}.gap-1{gap:4px}.flex-1{flex:1}.text-xs{font-size:11px}.text-sm{font-size:13px}.font-medium{font-weight:500}.font-semibold{font-weight:600}.font-bold{font-weight:700}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.p-3{padding:12px}.p-4{padding:16px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rounded-full{border-radius:9999px}.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div id="toast-container"></div>
+
+<!-- NAV -->
+<nav class="app-nav">
+  <div class="nav-brand">
+    <div class="nav-logo-mark">P</div>
+    <span class="nav-name">Pantau</span>
+    <span class="demo-pill">DEMO</span>
+  </div>
+  <div class="view-toggle">
+    <button class="vt-btn active" id="vt-manager" onclick="switchMainView('manager')">Manajer / PM</button>
+    <button class="vt-btn" id="vt-field" onclick="switchMainView('field')">Tampilan Lapangan 📱</button>
+  </div>
+  <div class="nav-spacer"></div>
+  <div class="nav-ctx" id="nav-ctx"></div>
+</nav>
+
+<!-- MANAGER VIEW -->
+<div id="manager-view" class="app-shell">
+  <!-- LEFT RAIL -->
+  <nav class="left-rail" id="left-rail">
+    <button class="rail-btn active" id="rail-dash" onclick="managerNav('dashboard')" title="Dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+    </button>
+    <button class="rail-btn" id="rail-map" onclick="managerNav('map')" title="Peta Proyek">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+    </button>
+    <button class="rail-btn" id="rail-review" onclick="managerNav('review')" title="Antrian Review">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+    </button>
+    <button class="rail-btn" id="rail-spk" onclick="managerNav('spk')" title="Builder SPK / Tahapan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="11" y2="17"/></svg>
+    </button>
+    <div class="rail-divider"></div>
+    <button class="rail-btn" onclick="showNewProjectModal()" title="Proyek Baru">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </nav>
+  <!-- MAIN AREA -->
+  <div class="main-area" id="manager-main"></div>
+</div>
+
+<!-- FIELD VIEW (hidden by default) -->
+<div id="field-view" class="app-shell hidden" style="padding-top:52px">
+  <div class="field-wrap" id="field-main"></div>
+</div>
+
+<!-- NEW PROJECT MODAL -->
+<div id="modal-np" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center">
+  <div class="card fade-in" style="width:420px;padding:24px">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px">Proyek Baru</h2>
+    <label class="text-xs font-medium" style="color:var(--t2);display:block;margin-bottom:4px">Nama proyek</label>
+    <input id="np-name" class="inp" placeholder="mis. Grand Cikarang Residence Blok C" style="margin-bottom:10px">
+    <label class="text-xs font-medium" style="color:var(--t2);display:block;margin-bottom:4px">Kode proyek</label>
+    <input id="np-code" class="inp" placeholder="mis. GCR-C" style="margin-bottom:16px">
+    <div class="flex gap-2">
+      <button onclick="closeModal()" class="btn btn-ghost" style="flex:1">Batal</button>
+      <button onclick="createProject()" class="btn btn-primary" style="flex:1">Buat & Buka</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ================================================================
+//  MOCK DATA — Realistic Indonesian residential construction data
+// ================================================================
+// ── STAGE SYSTEM ──────────────────────────────────────────────
+// Stages are NEVER hardcoded. Each project/template defines its own.
+// Two entry paths:
+//   A) Manager types stages manually in the SPK builder
+//   B) Manager uploads an SPK document → AI synthesizes stages
+// The functions below support the demo SPK builder UI.
+
+function blankStage(n) {
+  return { n, name: '', subtasks: [], status: 'not_started',
+    submittedBy: null, reviewedBy: null, date: null };
+}
+
+function blankSubtask(n) {
+  return { n, name: '', requiresPhoto: false, done: false, photo: null };
+}
+
+// Simulates what Gemini returns after reading an uploaded SPK document.
+// In production: POST /api/v1/spk/synthesize  body: FormData{document}
+// Returns structured stage JSON based on the actual document content.
+async function mockSynthesizeDocument(filename) {
+  await delay(2600);
+  // Returns a placeholder showing what AI synthesis looks like —
+  // not real stages, just the structure so the manager can see and edit.
+  return [
+    { n:1, name:'[Tahap dari dokumen Anda]', subtasks:[
+      { n:1, name:'[Pekerjaan pertama]', requiresPhoto:true },
+      { n:2, name:'[Pekerjaan kedua]', requiresPhoto:false },
+    ]},
+    { n:2, name:'[Tahap berikutnya dari dokumen]', subtasks:[
+      { n:1, name:'[Pekerjaan dari SPK Anda]', requiresPhoto:true },
+    ]},
+  ];
+}
+
+function makeMockPhoto(i) {
+  const colors=['#152540','#0A2519','#200814','#251407'];
+  const labels=['Galian pondasi','Pengecoran kolom','Pasang bata','Keramik KM'];
+  const c=colors[i%colors.length]; const l=labels[i%labels.length];
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150"><rect width="200" height="150" fill="${c}"/><text x="100" y="65" text-anchor="middle" font-family="Arial" font-size="22" fill="#94A3B8">📷</text><text x="100" y="95" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">${l}</text></svg>`)}`;
+}
+
+// makeStageHistory uses ONLY stages that were passed in from the project template.
+// Stages come from what the manager defined — never from a global hardcoded list.
+// For the demo, mock projects ship with pre-defined template stages to show
+// what a filled-out project looks like. Real projects start with blank templates.
+function makeStageHistory(progressPct, stageTemplates) {
+  if (!stageTemplates || !stageTemplates.length) return [];
+  const totalStages = stageTemplates.length;
+  const approvedCount = Math.floor((progressPct / 100) * totalStages);
+  const namen = ['Budi Santoso', 'Agus Raharjo', 'Siti Aminah'];
+  const koord = ['Dewi Pratiwi', 'Hendra Kusuma'];
+  const months = ['02','03','04','05','06','07','08','09'];
+  return stageTemplates.map((def, i) => {
+    const done = i < approvedCount;
+    const isPending = i === approvedCount && progressPct > 0;
+    const st = done ? 'approved' : isPending ? 'pending' : 'not_started';
+    return {
+      n: def.n, name: def.name, status: st,
+      submittedBy: st !== 'not_started' ? namen[i % 3] : null,
+      reviewedBy: st === 'approved' ? koord[i % 2] : null,
+      date: st !== 'not_started' ? `2025-${months[Math.min(i, 7)]}-${String(10 + i * 2).padStart(2, '0')}` : null,
+      subtasks: (def.subtasks || []).map((s, j) => ({
+        ...s,
+        done: done || (isPending && j < Math.floor((def.subtasks || []).length * 0.6)),
+        photo: (done && s.requiresPhoto) ? makeMockPhoto(i + j) : null,
+      })),
+    };
+  });
+}
+
+const MOCK = {
+  org:{id:'org_1',name:'PT Karya Gemilang Nusantara'},
+  subcontractors:[
+    {id:'sub_1',name:'CV Bangun Jaya',color:'#3B82F6',fill:'#0F2040',init:'BJ'},
+    {id:'sub_2',name:'PT Mitra Konstruksi',color:'#7C3AED',fill:'#180D40',init:'MK'},
+    {id:'sub_3',name:'UD Rapi Sejahtera',color:'#EC4899',fill:'#200815',init:'RS'},
+  ],
+  supervisors:[
+    {id:'sv_1',name:'Budi Santoso',area:'Blok A–B',phone:'0812-3456-7890'},
+    {id:'sv_2',name:'Agus Raharjo',area:'Blok C–D',phone:'0813-2345-6789'},
+    {id:'sv_3',name:'Siti Aminah',area:'Fasilitas',phone:'0814-3456-7890'},
+  ],
+  projects: buildMockProjects()
+};
+
+// Stage templates are owned by the project/template record.
+// These demo templates simulate what a manager would have typed in
+// or uploaded from their SPK document. They are NOT global hardcoded stages.
+const DEMO_TEMPLATE_GCR = [
+  { n:1, name:'Pekerjaan Persiapan', subtasks:[
+    {n:1,name:'Pembersihan lahan',requiresPhoto:true},
+    {n:2,name:'Pemasangan bouwplank',requiresPhoto:true},
+    {n:3,name:'Mobilisasi material',requiresPhoto:false}]},
+  { n:2, name:'Pekerjaan Pondasi', subtasks:[
+    {n:1,name:'Galian tanah',requiresPhoto:true},
+    {n:2,name:'Urugan pasir',requiresPhoto:false},
+    {n:3,name:'Pondasi batu kali',requiresPhoto:true},
+    {n:4,name:'Pengecoran sloof',requiresPhoto:true}]},
+  { n:3, name:'Pekerjaan Struktur', subtasks:[
+    {n:1,name:'Kolom beton',requiresPhoto:true},
+    {n:2,name:'Ring balok',requiresPhoto:true},
+    {n:3,name:'Curing beton',requiresPhoto:false}]},
+  { n:4, name:'Pekerjaan Dinding', subtasks:[
+    {n:1,name:'Pasangan bata',requiresPhoto:true},
+    {n:2,name:'Plesteran',requiresPhoto:false},
+    {n:3,name:'Acian',requiresPhoto:false}]},
+  { n:5, name:'Pekerjaan Atap', subtasks:[
+    {n:1,name:'Rangka atap',requiresPhoto:true},
+    {n:2,name:'Penutup atap',requiresPhoto:true}]},
+  { n:6, name:'Kusen & Pintu', subtasks:[
+    {n:1,name:'Kusen pintu & jendela',requiresPhoto:true},
+    {n:2,name:'Daun pintu & jendela',requiresPhoto:false}]},
+  { n:7, name:'Pekerjaan Lantai', subtasks:[
+    {n:1,name:'Waterproofing',requiresPhoto:true},
+    {n:2,name:'Keramik lantai',requiresPhoto:true}]},
+  { n:8, name:'Instalasi Listrik', subtasks:[
+    {n:1,name:'Instalasi kabel',requiresPhoto:false},
+    {n:2,name:'Panel & MCB',requiresPhoto:true},
+    {n:3,name:'Pengujian instalasi',requiresPhoto:true}]},
+  { n:9, name:'Instalasi Sanitasi', subtasks:[
+    {n:1,name:'Pipa air bersih & kotor',requiresPhoto:false},
+    {n:2,name:'Closet & wastafel',requiresPhoto:true}]},
+  { n:10, name:'Finishing', subtasks:[
+    {n:1,name:'Pengecatan',requiresPhoto:true},
+    {n:2,name:'Pembersihan akhir',requiresPhoto:false}]},
+];
+
+function buildMockProjects() {
+  const progs=[100,100,100,100,100,75,75,75,75,50,50,50,25,25,0,25,0,0,0,0];
+  const subs=['sub_1','sub_1','sub_1','sub_2','sub_2','sub_2','sub_2','sub_3','sub_3','sub_3','sub_3','sub_1','sub_1','sub_2','sub_2','sub_3','sub_3','sub_1','sub_2',null];
+  const svs=['sv_1','sv_1','sv_1','sv_1','sv_1','sv_1','sv_1','sv_2','sv_2','sv_2','sv_2','sv_2','sv_2','sv_2','sv_2','sv_3','sv_3','sv_3','sv_3',null];
+  const urg=['normal','normal','normal','normal','normal','normal','high','normal','normal','high','critical','normal','normal','high','normal','normal','critical','normal','normal','normal'];
+
+  const blocks=[];
+  const rows=[{l:'A',y:0.05},{l:'B',y:0.25},{l:'C',y:0.55},{l:'D',y:0.75}];
+  const counts=[5,5,5,4];
+  let idx=0;
+  rows.forEach((r,ri)=>{
+    for(let c=0;c<counts[ri];c++){
+      const pct=progs[idx]||0;
+      blocks.push({
+        id:`u_${idx+1}`,type:'house',code:`${r.l}-0${c+1}`,
+        x:0.02+c*0.18,y:r.y,width:0.15,height:0.18,
+        subId:subs[idx]||null,svId:svs[idx]||null,urgency:urg[idx]||'normal',
+        tplId:'tpl_gcr',pct,pending:pct>0&&pct<100&&Math.random()>0.65,
+        // Stages come from the project template, not a global array
+        stages:makeStageHistory(pct, DEMO_TEMPLATE_GCR)
+      });
+      idx++;
+    }
+  });
+  blocks.push({id:'road1',type:'road',code:'JALAN-01',x:0,y:0.445,width:0.92,height:0.08,subId:null,svId:null,urgency:'normal',pct:60,pending:false,stages:[]});
+  blocks.push({id:'park1',type:'common_area',code:'TAMAN-01',x:0.76,y:0.75,width:0.22,height:0.18,subId:'sub_3',svId:'sv_3',urgency:'normal',pct:30,pending:false,stages:[]});
+  blocks.push({id:'fac1',type:'facility',code:'CLUBHOUSE',x:0.76,y:0.55,width:0.22,height:0.18,subId:'sub_2',svId:'sv_2',urgency:'normal',pct:10,pending:false,stages:[]});
+
+  // BPB project uses a different template — manager defined it differently
+  const BPB_TEMPLATE = [
+    { n:1, name:'Persiapan Lahan', subtasks:[{n:1,name:'Pembersihan',requiresPhoto:true},{n:2,name:'Pengukuran',requiresPhoto:false}]},
+    { n:2, name:'Pondasi', subtasks:[{n:1,name:'Galian',requiresPhoto:true},{n:2,name:'Cor pondasi',requiresPhoto:true}]},
+    { n:3, name:'Struktur Utama', subtasks:[{n:1,name:'Kolom & balok',requiresPhoto:true}]},
+    { n:4, name:'Dinding & Atap', subtasks:[{n:1,name:'Bata & plester',requiresPhoto:false},{n:2,name:'Rangka & atap',requiresPhoto:true}]},
+    { n:5, name:'MEP', subtasks:[{n:1,name:'Listrik',requiresPhoto:true},{n:2,name:'Plumbing',requiresPhoto:true}]},
+    { n:6, name:'Finishing', subtasks:[{n:1,name:'Cat & keramik',requiresPhoto:true},{n:2,name:'Pembersihan',requiresPhoto:false}]},
+  ];
+
+  const bpBlocks=[];
+  for(let r=0;r<3;r++) for(let c=0;c<4;c++){
+    const p=[25,25,10,10,50,50,25,10,0,0,0,0][r*4+c];
+    bpBlocks.push({id:`bp_${r*4+c+1}`,type:'house',code:`B-${String(r*4+c+1).padStart(2,'0')}`,
+      x:0.03+c*0.22,y:0.08+r*0.28,width:0.18,height:0.22,
+      subId:['sub_1','sub_2','sub_3'][r],svId:['sv_1','sv_2','sv_3'][r],
+      urgency:'normal',tplId:'tpl_bpb',pct:p,pending:false,
+      stages:makeStageHistory(p, BPB_TEMPLATE)});
+  }
+  bpBlocks.push({id:'bp_r',type:'road',code:'JALAN-01',x:0,y:0.92,width:1,height:0.08,pct:0,pending:false,stages:[],subId:null,svId:null,urgency:'normal'});
+
+  return [
+    {id:'p1',code:'GCR-A',name:'Grand Cikarang Residence — Blok A',status:'active',
+     templateStages: DEMO_TEMPLATE_GCR, // stored on the project, not global
+     canvas:{blocks},img:null,created:'2025-03-01'},
+    {id:'p2',code:'BPB-B',name:'Bekasi Permai — Blok B',status:'active',
+     templateStages: BPB_TEMPLATE,
+     canvas:{blocks:bpBlocks},img:null,created:'2025-04-15'},
+  ];
+}
+
+// ================================================================
+//  API LAYER
+// ================================================================
+const API = {
+  async digitize(imgDataUrl){ await delay(2800); return {data:mockDigitizeBlocks()}; },
+  async save(p){ const all=getProjects(); const i=all.findIndex(x=>x.id===p.id); if(i>=0)all[i]=p; else all.push(p); localStorage.setItem('pantau_p',JSON.stringify(all)); return {data:p}; },
+  async list(){ const s=localStorage.getItem('pantau_p'); return {data: s?JSON.parse(s):[...MOCK.projects]}; },
+  async telegram(msg){ await delay(400); console.log('[Telegram]',msg); return {data:{sent:true}}; },
+};
+
+function mockDigitizeBlocks(){
+  const blocks=[];
+  const rows=[{l:'A',y:0.06},{l:'B',y:0.26},{l:'C',y:0.56},{l:'D',y:0.76}];
+  const c=[5,5,5,4]; let idx=1;
+  rows.forEach((r,ri)=>{for(let col=0;col<c[ri];col++){
+    blocks.push({id:`n${idx}`,type:'house',code:`${r.l}-0${col+1}`,x:0.02+col*0.18,y:r.y,width:0.15,height:0.17,subId:null,svId:null,urgency:'normal',pct:0,pending:false,stages:[],tplId:null,conf:0.82+Math.random()*0.17});
+    idx++;
+  }});
+  blocks.push({id:'n_r',type:'road',code:'JALAN-01',x:0,y:0.448,width:0.92,height:0.08,pct:0,stages:[],subId:null,svId:null,urgency:'normal'});
+  blocks.push({id:'n_p',type:'common_area',code:'TAMAN-01',x:0.76,y:0.76,width:0.22,height:0.17,pct:0,stages:[],subId:null,svId:null,urgency:'normal'});
+  return blocks;
+}
+
+// ================================================================
+//  STATE
+// ================================================================
+const S = {
+  mainView: 'manager',       // manager | field
+  managerPage: 'dashboard',  // dashboard | map | review
+  projId: null,
+  blockId: null,
+  openStages: new Set(),
+  mode: 'edit',              // edit | configure
+  cfgTab: 'sub',
+  paintId: null,
+  tool: 'select',
+  drag: {on:false,bid:null,sx:0,sy:0,bx:0,by:0,sw:0,sh:0},
+  draw: {on:false,x0:0,y0:0},
+  img: null,
+  studioTab: 'upload',       // upload | digitizing | editing
+  projects: [],
+  draftStages: null,         // stages being edited in SPK builder (null = not open yet)
+  // Field state
+  fScreen: 'home',           // home | unit | submit
+  fUnitId: null,
+  fActiveStage: null,
+  fPhotos: {},               // {subtaskKey: dataUrl}
+  fChecked: new Set(),
+};
+
+// ================================================================
+//  UTILS
+// ================================================================
+function delay(ms){return new Promise(r=>setTimeout(r,ms));}
+function toast(msg,type='info'){
+  const c=document.getElementById('toast-container');
+  const el=document.createElement('div');
+  const ic={info:'ℹ️',success:'✅',error:'❌',warn:'⚠️'};
+  el.className='toast-item';
+  el.textContent=`${ic[type]||''} ${msg}`;
+  c.appendChild(el);
+  setTimeout(()=>{el.style.transition='opacity .3s';el.style.opacity='0';setTimeout(()=>el.remove(),300);},3200);
+}
+function getProjects(){const s=localStorage.getItem('pantau_p');return s?JSON.parse(s):[...MOCK.projects];}
+function proj(){return S.projects.find(p=>p.id===S.projId);}
+function blocks(){return proj()?.canvas?.blocks||[];}
+function block(id){return blocks().find(b=>b.id===id);}
+function pct(p){
+  const u=(p.canvas?.blocks||[]).filter(b=>['house','apartment','shophouse','commercial','villa'].includes(b.type));
+  if(!u.length)return 0;
+  return Math.round(u.reduce((s,b)=>s+(b.pct||0),0)/u.length);
+}
+function sub(id){return MOCK.subcontractors.find(s=>s.id===id);}
+function sv(id){return MOCK.supervisors.find(s=>s.id===id);}
+function statusBadge(s){
+  const m={active:'badge-green',setup:'badge-amber',completed:'badge-gray'};
+  const l={active:'Aktif',setup:'Setup',completed:'Selesai'};
+  return `<span class="badge ${m[s]||'badge-gray'}">${l[s]||s}</span>`;
+}
+function urgBadge(u){
+  if(u==='critical')return `<span class="badge badge-red">⚡ Kritis</span>`;
+  if(u==='high')return `<span class="badge badge-amber">⚠ Prioritas</span>`;
+  return '';
+}
+const SVG_W=900,SVG_H=540;
+
+const TYPE_DARK={
+  house:{f:'#152540',s:'#3B82F6',t:'#93C5FD'},
+  apartment:{f:'#1A1040',s:'#7C3AED',t:'#A78BFA'},
+  shophouse:{f:'#251A05',s:'#F59E0B',t:'#FCD34D'},
+  commercial:{f:'#251A05',s:'#F59E0B',t:'#FCD34D'},
+  villa:{f:'#251508',s:'#EA580C',t:'#FB923C'},
+  road:{f:'#161820',s:'#334155',t:'#64748B'},
+  common_area:{f:'#071A12',s:'#059669',t:'#34D399'},
+  parking:{f:'#161820',s:'#475569',t:'#94A3B8'},
+  facility:{f:'#220D1A',s:'#DB2777',t:'#F472B6'},
+  drainage:{f:'#081A20',s:'#0891B2',t:'#22D3EE'},
+  boundary:{f:'transparent',s:'#374151',t:'#374151'},
+};
+
+function pgColor(p){
+  if(!p)return{f:'#141720',s:'#1E2337',t:'#3D4466'};
+  if(p<25)return{f:'#1A1D2A',s:'#2D3357',t:'#4B5683'};
+  if(p<50)return{f:'#082918',s:'#0A4A2E',t:'#10B981'};
+  if(p<75)return{f:'#054430',s:'#0D9488',t:'#2DD4BF'};
+  if(p<100)return{f:'#0A5545',s:'#14B8A6',t:'#5EEAD4'};
+  return{f:'#065F46',s:'#34D399',t:'#A7F3D0'};
+}
+
+function blockColor(b){
+  if(S.mode==='configure'){
+    if(S.cfgTab==='sub'&&b.subId){const s=sub(b.subId);if(s)return{f:s.fill,s:s.color,t:s.color};}
+    if(S.cfgTab==='urgency'){
+      if(b.urgency==='critical')return{f:'#250A0A',s:'#EF4444',t:'#FCA5A5'};
+      if(b.urgency==='high')return{f:'#251A05',s:'#F59E0B',t:'#FCD34D'};
+    }
+    if(S.cfgTab==='supervisor'&&b.svId){const idx=MOCK.supervisors.findIndex(x=>x.id===b.svId);const cs=[{f:'#0F2040',s:'#3B82F6'},{f:'#071A12',s:'#059669'},{f:'#251A05',s:'#F59E0B'}];return{...cs[idx%3],t:cs[idx%3].s};}
+  }
+  return TYPE_DARK[b.type]||{f:'#161820',s:'#334155',t:'#64748B'};
+}
+
+// ================================================================
+//  MAIN VIEW SWITCH
+// ================================================================
+async function switchMainView(v){
+  S.mainView=v;
+  document.getElementById('manager-view').classList.toggle('hidden',v!=='manager');
+  document.getElementById('field-view').classList.toggle('hidden',v!=='field');
+  document.getElementById('vt-manager').classList.toggle('active',v==='manager');
+  document.getElementById('vt-field').classList.toggle('active',v==='field');
+  if(v==='field'){S.fScreen='home';renderField();}
+  else{renderManagerPage();}
+}
+
+// ================================================================
+//  MANAGER — NAVIGATION
+// ================================================================
+function managerNav(page){
+  S.managerPage=page;
+  ['dash','map','review','spk'].forEach(k=>{
+    document.getElementById(`rail-${k}`)?.classList.toggle('active',k===page);
+  });
+  renderManagerPage();
+}
+
+function renderManagerPage(){
+  const el=document.getElementById('manager-main');
+  if(!el)return;
+  if(S.managerPage==='dashboard') el.innerHTML=renderDashboard();
+  else if(S.managerPage==='map'){ el.innerHTML=renderStudio(); setupCanvas(); }
+  else if(S.managerPage==='review') el.innerHTML=renderReview();
+  else if(S.managerPage==='spk') el.innerHTML=renderSPKBuilder();
+}
+
+// ================================================================
+//  MANAGER — DASHBOARD
+// ================================================================
+function renderDashboard(){
+  const ps=S.projects;
+  const totalUnits=ps.reduce((s,p)=>(p.canvas?.blocks||[]).filter(b=>b.type==='house').length+s,0);
+  const totalPending=ps.reduce((s,p)=>(p.canvas?.blocks||[]).filter(b=>b.pending).length+s,0);
+  const avgPct=ps.length?Math.round(ps.reduce((s,p)=>s+pct(p),0)/ps.length):0;
+
+  return `
+  <div class="scroll" style="height:100%;padding:20px">
+    <!-- Top stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      ${[
+        {label:'Total Proyek',val:ps.length,icon:'📁',color:'var(--accent-2)'},
+        {label:'Total Unit',val:totalUnits,icon:'🏠',color:'var(--blue)'},
+        {label:'Progres Rata-Rata',val:avgPct+'%',icon:'📊',color:'var(--green)'},
+        {label:'Menunggu Review',val:totalPending,icon:'⏳',color:'var(--amber)'},
+      ].map(s=>`
+        <div class="card p-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm" style="color:var(--t2)">${s.label}</span>
+            <span style="font-size:18px">${s.icon}</span>
+          </div>
+          <div style="font-size:26px;font-weight:800;color:${s.color}">${s.val}</div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Project list -->
+    <h2 style="font-size:13px;font-weight:600;color:var(--t2);margin-bottom:12px;letter-spacing:.06em;text-transform:uppercase">Proyek Aktif</h2>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      ${ps.map(p=>{
+        const pp=pct(p);
+        const units=(p.canvas?.blocks||[]).filter(b=>b.type==='house').length;
+        const done=(p.canvas?.blocks||[]).filter(b=>b.pct===100).length;
+        const pending=(p.canvas?.blocks||[]).filter(b=>b.pending).length;
+        return `
+        <div class="card card-hover" style="padding:18px;cursor:pointer">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="flex gap-2 items-center mb-1">
+                <span style="font-size:11px;font-weight:700;color:var(--accent-2);background:var(--accent-sub);padding:2px 7px;border-radius:4px;font-family:monospace">${p.code}</span>
+                ${statusBadge(p.status)}
+              </div>
+              <div style="font-weight:600;font-size:14px;margin-top:2px">${p.name}</div>
+            </div>
+            <div style="font-size:28px;font-weight:800;color:${pp>=75?'var(--green)':pp>=50?'var(--accent-2)':'var(--amber)'}">${pp}%</div>
+          </div>
+          <div class="pbar" style="margin-bottom:10px"><div class="pbar-fill ${pp>=100?'green':''}" style="width:${pp}%"></div></div>
+          <div class="flex justify-between" style="color:var(--t3);font-size:11px;margin-bottom:14px">
+            <span>${units} unit</span><span style="color:var(--green)">${done} selesai</span><span style="color:var(--amber)">${pending} review</span>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="openProject('${p.id}','map')" class="btn btn-primary" style="flex:1;font-size:12px">Buka Peta</button>
+            <button onclick="openProject('${p.id}','review')" class="btn btn-ghost" style="flex:1;font-size:12px">Review</button>
+          </div>
+        </div>`;
+      }).join('')}
+
+      <!-- Add project -->
+      <button onclick="showNewProjectModal()" style="border:2px dashed var(--border-md);border-radius:var(--r);padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--t3);transition:all .15s;cursor:pointer;background:transparent" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent-2)'" onmouseout="this.style.borderColor='var(--border-md)';this.style.color='var(--t3)'">
+        <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span style="font-size:13px;font-weight:500">Proyek Baru</span>
+      </button>
+    </div>
+  </div>`;
+}
+
+function openProject(id,page){
+  S.projId=id;
+  S.managerPage=page;
+  S.studioTab='editing';
+  ['dash','map','review'].forEach(k=>document.getElementById(`rail-${k}`)?.classList.toggle('active',k===page));
+  const p=proj();
+  document.getElementById('nav-ctx').innerHTML=p?`<span style="color:var(--accent-2);font-weight:600">${p.code}</span><span>—</span><span>${p.name}</span>`:'';
+  renderManagerPage();
+}
+
+// ================================================================
+//  MANAGER — MAP STUDIO
+// ================================================================
+function renderStudio(){
+  const p=proj();
+  const hasBlocks=(p?.canvas?.blocks||[]).length>0;
+  if(!hasBlocks&&S.studioTab!=='digitizing')S.studioTab='upload';
+
+  return `
+  <div style="display:flex;flex-direction:column;height:100%">
+    <!-- Top bar -->
+    <div style="background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 16px;height:48px;display:flex;align-items:center;gap:12px;flex-shrink:0">
+      <button onclick="managerNav('dashboard')" style="color:var(--t3);padding:6px;border-radius:6px;transition:all .15s" onmouseover="this.style.color='var(--t1)'" onmouseout="this.style.color='var(--t3)'">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <span style="font-weight:600">${p?.name||'Proyek Baru'}</span>
+      <div style="flex:1"></div>
+      ${hasBlocks?`
+      <div class="view-toggle" style="gap:2px;background:var(--bg-2)">
+        <button class="vt-btn ${S.mode==='edit'?'active':''}" onclick="setMode('edit');renderStudioOnly()">Edit</button>
+        <button class="vt-btn ${S.mode==='configure'?'active':''}" onclick="setMode('configure');renderStudioOnly()">Konfigurasi</button>
+      </div>
+      <button onclick="goProgress()" class="btn btn-primary" style="font-size:12px">Lihat Progres →</button>
+      `:''}
+    </div>
+
+    <!-- Body -->
+    <div style="display:flex;flex:1;overflow:hidden" id="studio-body">
+      ${hasBlocks?renderCanvasView():renderUploadView()}
+    </div>
+  </div>`;
+}
+
+function renderStudioOnly(){
+  S.mode=S.mode; // keep current
+  const el=document.getElementById('studio-body');
+  if(!el)return;
+  const hasBlocks=(proj()?.canvas?.blocks||[]).length>0;
+  el.innerHTML=hasBlocks?renderCanvasView():renderUploadView();
+  setupCanvas();
+}
+
+function renderUploadView(){
+  return `
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:32px">
+    <div style="max-width:520px;width:100%">
+      <div style="text-align:center;margin-bottom:28px">
+        <h2 style="font-size:20px;font-weight:700;margin-bottom:6px">Siapkan peta proyek</h2>
+        <p style="color:var(--t2);font-size:13px">Upload foto denah atau buat dari nol. Pantau akan mendeteksi unit secara otomatis.</p>
+      </div>
+
+      <!-- Upload zone -->
+      <div id="upload-zone" onclick="document.getElementById('fu').click()"
+        style="border:2px dashed var(--border-md);border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:all .2s"
+        onmouseover="this.style.borderColor='var(--accent)';this.style.background='var(--accent-sub)'"
+        onmouseout="this.style.borderColor='var(--border-md)';this.style.background='transparent'"
+        ondragover="event.preventDefault()" ondrop="handleDrop(event)">
+        <div style="width:56px;height:56px;border-radius:14px;background:var(--bg-3);margin:0 auto 14px;display:flex;align-items:center;justify-content:center">
+          <svg width="26" height="26" fill="none" stroke="var(--t2)" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
+        <p style="font-weight:600;color:var(--t1);margin-bottom:4px">Upload denah proyek</p>
+        <p style="font-size:12px;color:var(--t3)">JPG, PNG, HEIC, PDF — maks. 20MB</p>
+        <input id="fu" type="file" accept=".jpg,.jpeg,.png,.heic,.pdf" class="hidden" onchange="handleFile(event)">
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin:16px 0">
+        <div style="flex:1;height:1px;background:var(--border)"></div><span style="color:var(--t3);font-size:11px">atau</span><div style="flex:1;height:1px;background:var(--border)"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <button onclick="loadTpl('grid')" class="card" style="padding:16px;text-align:left;cursor:pointer;transition:all .15s;border:1px solid var(--border)" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-bottom:10px">
+            ${Array(15).fill(0).map((_,i)=>`<div style="height:10px;border-radius:2px;background:${i===5?'#334155':'#152540'};border:1px solid ${i===5?'#475569':'#3B82F6'}"></div>`).join('')}
+          </div>
+          <p style="font-weight:600;font-size:13px">Cluster grid</p>
+          <p style="font-size:11px;color:var(--t3)">Baris rumah + jalan tengah</p>
+        </button>
+        <button onclick="loadTpl('row')" class="card" style="padding:16px;text-align:left;cursor:pointer;transition:all .15s;border:1px solid var(--border)" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:10px">
+            <div style="display:flex;gap:3px">${Array(4).fill(0).map(()=>`<div style="flex:1;height:14px;border-radius:2px;background:#152540;border:1px solid #3B82F6"></div>`).join('')}</div>
+            <div style="height:6px;border-radius:2px;background:#1E2337"></div>
+            <div style="display:flex;gap:3px">${Array(4).fill(0).map(()=>`<div style="flex:1;height:14px;border-radius:2px;background:#152540;border:1px solid #3B82F6"></div>`).join('')}</div>
+          </div>
+          <p style="font-weight:600;font-size:13px">Dua baris</p>
+          <p style="font-size:11px;color:var(--t3)">Dua baris dengan jalan di tengah</p>
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderCanvasView(){
+  const blks=blocks();
+  return `
+  <div style="display:flex;flex:1;overflow:hidden">
+    <!-- LEFT CONFIG -->
+    <div class="side-panel scroll">
+      ${S.mode==='edit'?renderEditPanel():renderCfgPanel()}
+    </div>
+
+    <!-- CANVAS -->
+    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg-base)">
+      ${S.studioTab==='digitizing'?`
+      <div style="position:absolute;inset:0;background:rgba(8,10,16,.82);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;backdrop-filter:blur(4px)" id="digtoverlay">
+        <svg class="spin" width="40" height="40" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="rgba(124,58,237,.25)" stroke-width="3"/><path d="M12 2a10 10 0 0110 10" stroke="var(--accent-2)" stroke-width="3" stroke-linecap="round"/></svg>
+        <div style="text-align:center">
+          <p style="font-weight:600;font-size:15px;margin-bottom:4px">Menganalisis denah...</p>
+          <p style="color:var(--t2);font-size:12px">AI sedang mendeteksi unit dan area</p>
+        </div>
+      </div>
+      `:''}
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:16px;position:relative">
+        <div class="canvas-wrap" style="width:100%;max-width:900px;aspect-ratio:900/540">
+          <svg id="map-svg" viewBox="0 0 900 540" style="width:100%;height:100%;display:block">
+            ${S.img?`<image href="${S.img}" x="0" y="0" width="900" height="540" preserveAspectRatio="xMidYMid slice" opacity="0.25"/>`:''}
+            <g id="blocks-group"></g>
+            <rect id="draw-prev" x="0" y="0" width="0" height="0" fill="#7C3AED" fill-opacity=".25" stroke="var(--accent-2)" stroke-width="1.5" stroke-dasharray="6,3"/>
+          </svg>
+        </div>
+      </div>
+      <!-- Toolbar -->
+      ${S.mode==='edit'?`
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;background:var(--bg-1);border-top:1px solid var(--border)">
+        ${[['select','Pilih','M5 3l14 9-7 1-4 6z'],['add','Tambah','M3 3h18v18H3z M12 8v8 M8 12h8']].map(([tool,lbl,path])=>`
+          <button onclick="S.tool='${tool}';updateCanvas()" class="btn ${S.tool===tool?'btn-primary':'btn-ghost'}" style="font-size:11px;gap:4px">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="${path}"/></svg>${lbl}
+          </button>`).join('')}
+        <button onclick="deleteBlock()" class="btn btn-danger" style="font-size:11px">Hapus</button>
+        <span style="color:var(--t3);font-size:11px;margin-left:8px">${blks.length} blok</span>
+      </div>`:''}
+    </div>
+
+    <!-- RIGHT PROPERTIES -->
+    <div class="right-panel scroll" id="right-panel">
+      ${renderPropsPanel()}
+    </div>
+  </div>`;
+}
+
+function renderEditPanel(){
+  const b=S.blockId?block(S.blockId):null;
+  return `
+  <div class="panel-section">
+    <div class="panel-label">Alat Edit</div>
+    ${[['select','Pilih & geser'],['add','Gambar blok baru']].map(([t,l])=>`
+      <button onclick="S.tool='${t}';updateCanvas()" style="width:100%;text-align:left;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:500;color:${S.tool===t?'var(--accent-2)':'var(--t2)'};background:${S.tool===t?'var(--accent-sub)':'transparent'};transition:all .15s;margin-bottom:3px;display:flex;align-items:center;gap:8px">
+        <div style="width:6px;height:6px;border-radius:50%;background:${S.tool===t?'var(--accent-2)':'var(--t3)'}"></div>${l}
+      </button>`).join('')}
+    ${S.tool==='add'?`<p style="font-size:11px;color:var(--accent-2);background:var(--accent-sub);padding:8px;border-radius:6px;margin-top:8px;border:1px solid rgba(124,58,237,.2)">Klik dan seret di kanvas untuk menggambar blok baru.</p>`:''}
+  </div>
+  ${b?`
+  <div class="panel-section">
+    <div class="panel-label">Properti Blok</div>
+    <label style="font-size:11px;color:var(--t3);display:block;margin-bottom:4px">Kode unit</label>
+    <input class="inp" value="${b.code}" oninput="b_set('${b.id}','code',this.value)" style="margin-bottom:8px">
+    <label style="font-size:11px;color:var(--t3);display:block;margin-bottom:4px">Tipe area</label>
+    <select class="inp sel" onchange="b_set('${b.id}','type',this.value)" style="margin-bottom:8px">
+      ${Object.keys(TYPE_DARK).map(t=>`<option value="${t}" ${b.type===t?'selected':''}>${t.replace('_',' ')}</option>`).join('')}
+    </select>
+  </div>`:`
+  <div style="padding:20px;text-align:center;color:var(--t3);font-size:12px;margin-top:16px">Klik blok untuk melihat properti</div>`}`;
+}
+
+function renderCfgPanel(){
+  const tabs=[['sub','Subkontraktor'],['supervisor','Pengawas'],['type','Tipe Area'],['urgency','Urgensi'],['spk','Template SPK']];
+  return `
+  <div class="panel-section">
+    <div class="panel-label">Konfigurasi</div>
+    ${tabs.map(([id,lbl])=>`
+      <button onclick="S.cfgTab='${id}';S.paintId=null;updateCfgPanel()" style="width:100%;text-align:left;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:500;color:${S.cfgTab===id?'var(--accent-2)':'var(--t2)'};background:${S.cfgTab===id?'var(--accent-sub)':'transparent'};transition:all .15s;margin-bottom:2px">${lbl}</button>`).join('')}
+  </div>
+  <div class="panel-section" id="cfg-panel-body">
+    ${renderCfgBody()}
+  </div>`;
+}
+
+function renderCfgBody(){
+  if(S.cfgTab==='sub') return `
+    <p style="font-size:11px;color:var(--t3);margin-bottom:10px">Pilih subkontraktor, klik unit untuk assign.</p>
+    ${MOCK.subcontractors.map(s=>`
+      <button onclick="S.paintId='${s.id}';updateCfgPanel()" style="width:100%;display:flex;align-items:center;gap:8px;padding:8px;border-radius:7px;border:1px solid ${S.paintId===s.id?s.color:'var(--border)'};background:${S.paintId===s.id?s.fill:'transparent'};transition:all .15s;margin-bottom:6px">
+        <div style="width:28px;height:28px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${s.init}</div>
+        <span style="font-size:12px;font-weight:500;color:var(--t1)">${s.name}</span>
+      </button>`).join('')}
+    <button onclick="S.paintId='__clear__'" style="width:100%;border:1px dashed var(--border-md);border-radius:7px;padding:7px;font-size:12px;color:var(--t3);transition:all .15s">Hapus penugasan</button>`;
+
+  if(S.cfgTab==='supervisor') return `
+    <p style="font-size:11px;color:var(--t3);margin-bottom:10px">Pilih pengawas, klik unit untuk assign.</p>
+    ${MOCK.supervisors.map((s,i)=>{const cs=['#3B82F6','#10B981','#F59E0B'];return `
+      <button onclick="S.paintId='${s.id}';updateCfgPanel()" style="width:100%;display:flex;align-items:center;gap:8px;padding:8px;border-radius:7px;border:1px solid ${S.paintId===s.id?cs[i]:'var(--border)'};background:${S.paintId===s.id?'rgba(255,255,255,.04)':'transparent'};transition:all .15s;margin-bottom:6px">
+        <div style="width:28px;height:28px;border-radius:50%;background:var(--bg-3);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${cs[i]};flex-shrink:0">${s.name[0]}</div>
+        <div style="text-align:left"><p style="font-size:12px;font-weight:500;color:var(--t1)">${s.name}</p><p style="font-size:10px;color:var(--t3)">${s.area}</p></div>
+      </button>`;}).join('')}`;
+
+  if(S.cfgTab==='urgency') return `
+    <p style="font-size:11px;color:var(--t3);margin-bottom:10px">Pilih level urgensi, klik unit untuk assign.</p>
+    ${[['normal','Normal','var(--t2)'],['high','Prioritas Tinggi','var(--amber)'],['critical','Kritis','var(--red)']].map(([id,lbl,c])=>`
+      <button onclick="S.paintId='${id}';updateCfgPanel()" style="width:100%;display:flex;align-items:center;gap:8px;padding:8px;border-radius:7px;border:1px solid ${S.paintId===id?c:'var(--border)'};transition:all .15s;margin-bottom:6px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${c}"></div>
+        <span style="font-size:12px;font-weight:500;color:var(--t1)">${lbl}</span>
+      </button>`).join('')}`;
+
+  if(S.cfgTab==='type') return `
+    <p style="font-size:11px;color:var(--t3);margin-bottom:10px">Pilih tipe, klik unit untuk assign.</p>
+    ${Object.entries(TYPE_DARK).map(([t,c])=>`
+      <button onclick="S.paintId='${t}';updateCfgPanel()" style="width:100%;display:flex;align-items:center;gap:8px;padding:7px;border-radius:6px;border:1px solid ${S.paintId===t?c.s:'var(--border)'};transition:all .15s;margin-bottom:4px">
+        <div style="width:16px;height:12px;border-radius:2px;background:${c.f};border:1px solid ${c.s}"></div>
+        <span style="font-size:12px;color:var(--t1)">${t.replace('_',' ')}</span>
+      </button>`).join('')}`;
+
+  return `<p style="font-size:12px;color:var(--t3)">Pilih template SPK, klik unit untuk assign.</p>`;
+}
+
+function updateCfgPanel(){
+  const el=document.getElementById('cfg-panel-body');if(el)el.innerHTML=renderCfgBody();
+  updateCanvas();
+}
+
+function renderPropsPanel(){
+  const b=S.blockId?block(S.blockId):null;
+  if(!b) return `<div style="padding:24px;text-align:center;color:var(--t3);font-size:12px;margin-top:24px"><svg width="36" height="36" fill="none" stroke="var(--t3)" stroke-width="1.5" viewBox="0 0 24 24" style="display:block;margin:0 auto 10px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h4"/></svg>Klik unit di peta untuk melihat detail</div>`;
+
+  const sb=sub(b.subId);const sv_=sv(b.svId);
+  return `
+  <div class="panel-section">
+    <div class="flex items-center justify-between">
+      <div>
+        <div style="font-size:18px;font-weight:800">${b.code}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px;text-transform:capitalize">${b.type.replace('_',' ')}</div>
+      </div>
+      <div style="text-align:right">
+        ${urgBadge(b.urgency)}
+        <div style="font-size:22px;font-weight:800;color:${pgColor(b.pct).t};margin-top:2px">${b.pct||0}%</div>
+      </div>
+    </div>
+    <div class="pbar" style="margin-top:10px"><div class="pbar-fill ${b.pct>=100?'green':''}" style="width:${b.pct||0}%"></div></div>
+  </div>
+  ${sb?`<div class="panel-section"><div class="panel-label">Subkontraktor</div><div class="flex items-center gap-2"><div style="width:28px;height:28px;border-radius:50%;background:${sb.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">${sb.init}</div><span style="font-size:13px">${sb.name}</span></div></div>`:''}
+  ${sv_?`<div class="panel-section"><div class="panel-label">Pengawas</div><div style="font-size:13px">${sv_.name}</div><div style="font-size:11px;color:var(--t3)">${sv_.area}</div></div>`:''}
+  <div class="panel-section">
+    <div class="panel-label">Tahapan Pekerjaan</div>
+    ${(b.stages||[]).map(st=>renderStageItem(b.id,st)).join('')||'<p style="font-size:11px;color:var(--t3)">Belum ada tahapan</p>'}
+  </div>`;
+}
+
+function renderStageItem(bid, st){
+  const isOpen=S.openStages.has(`${bid}-${st.n}`);
+  const sc={approved:'badge-green',pending:'badge-amber',not_started:'badge-gray'}[st.status];
+  const sl={approved:'Disetujui',pending:'Menunggu',not_started:'Belum mulai'}[st.status];
+  const snum_color={approved:'var(--green)',pending:'var(--amber)',not_started:'var(--t3)'}[st.status];
+  return `
+  <div class="stage-item">
+    <div class="stage-header" onclick="toggleStage('${bid}','${st.n}')">
+      <div class="stage-num" style="background:${snum_color==='var(--green)'?'rgba(16,185,129,.15)':snum_color==='var(--amber)'?'rgba(245,158,11,.15)':'var(--bg-3)'};color:${snum_color}">${String(st.n).padStart(2,'0')}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;truncate">${st.name}</div>
+        ${st.submittedBy?`<div style="font-size:10px;color:var(--t3)">${st.submittedBy}${st.date?' · '+st.date.slice(5):''}</div>`:''}
+      </div>
+      <span class="badge ${sc}" style="font-size:10px;flex-shrink:0">${sl}</span>
+      <svg width="14" height="14" fill="none" stroke="var(--t3)" stroke-width="2" viewBox="0 0 24 24" style="transform:${isOpen?'rotate(90deg)':'none'};transition:transform .2s;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+    ${isOpen?`
+    <div class="stage-body open">
+      ${(st.subtasks||[]).map((s,i)=>`
+        <div class="subtask-row">
+          <div class="check-box ${s.done?'done':''}" style="flex-shrink:0">
+            ${s.done?`<svg width="10" height="10" fill="none" stroke="#fff" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`:''}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:${s.done?'var(--t2)':'var(--t1)'}">${s.name}${s.photo?'<span style="color:var(--accent-2);margin-left:4px;font-size:10px">📷 wajib</span>':''}</div>
+            ${s.photo&&s.done&&s.photo!==true?`<div class="photo-grid" style="grid-template-columns:repeat(2,1fr);margin-top:6px"><img src="${s.photo}" class="photo-thumb" style="cursor:pointer" onclick="viewPhoto('${s.photo}')"></div>`:''}
+          </div>
+        </div>`).join('')}
+      ${st.status==='pending'?`
+      <div style="margin-top:10px;display:flex;gap:6px">
+        <button onclick="approveStage('${bid}','${st.n}')" class="btn btn-success" style="flex:1;font-size:11px">✓ Setujui</button>
+        <button onclick="denyStage('${bid}','${st.n}')" class="btn btn-danger" style="flex:1;font-size:11px">✗ Tolak</button>
+      </div>`:''}
+    </div>`:''}
+  </div>`;
+}
+
+function toggleStage(bid,n){
+  const key=`${bid}-${n}`;
+  if(S.openStages.has(key))S.openStages.delete(key);else S.openStages.add(key);
+  const rp=document.getElementById('right-panel');if(rp)rp.innerHTML=renderPropsPanel();
+}
+
+function approveStage(bid,n){
+  const b=block(bid);if(!b)return;
+  const st=b.stages.find(s=>s.n==n);if(!st)return;
+  st.status='approved';st.reviewedBy='Dewi Pratiwi';st.date=new Date().toISOString().slice(0,10);
+  const approvedCount=b.stages.filter(s=>s.status==='approved').length;
+  b.pct=Math.round((approvedCount/b.stages.length)*100);
+  API.save(proj());updateCanvas();
+  const rp=document.getElementById('right-panel');if(rp)rp.innerHTML=renderPropsPanel();
+  toast('Tahap disetujui','success');
+}
+
+async function denyStage(bid,n){
+  const reason=prompt('Alasan penolakan:');if(!reason)return;
+  const b=block(bid);if(!b)return;
+  const st=b.stages.find(s=>s.n==n);if(!st)return;
+  st.status='denied';
+  await API.telegram(`🔴 DITOLAK — ${proj()?.name}\nUnit: ${b.code} | Tahap: ${st.name}\nAlasan: ${reason}\nOleh: Koordinator`);
+  API.save(proj());updateCanvas();
+  const rp=document.getElementById('right-panel');if(rp)rp.innerHTML=renderPropsPanel();
+  toast('Ditolak. Telegram terkirim (simulasi)','warn');
+}
+
+function viewPhoto(url){
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:999;display:flex;align-items:center;justify-content:center;cursor:pointer';
+  d.innerHTML=`<img src="${url}" style="max-width:90%;max-height:90%;border-radius:8px">`;
+  d.onclick=()=>d.remove();
+  document.body.appendChild(d);
+}
+
+// ================================================================
+//  MANAGER — REVIEW PAGE
+// ================================================================
+function renderReview(){
+  const p=proj();
+  if(!p){
+    return `<div style="padding:24px">
+      <h2 style="font-weight:700;margin-bottom:16px">Antrian Review</h2>
+      <p style="color:var(--t2)">Pilih proyek terlebih dahulu.</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:16px">
+        ${S.projects.map(pr=>`<button onclick="openProject('${pr.id}','review')" class="card card-hover" style="padding:16px;text-align:left">${pr.name}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  const pending=(p.canvas?.blocks||[]).filter(b=>b.stages?.some(s=>s.status==='pending'));
+  return `
+  <div class="scroll" style="height:100%;padding:20px">
+    <div class="flex items-center gap-3 mb-5">
+      <button onclick="managerNav('dashboard')" style="color:var(--t3);padding:6px;border-radius:6px" onmouseover="this.style.color='var(--t1)'" onmouseout="this.style.color='var(--t3)'"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+      <h2 style="font-size:16px;font-weight:700">Antrian Review — ${p.code}</h2>
+      <span class="badge badge-amber">${pending.length} menunggu</span>
+    </div>
+    ${!pending.length?`<div style="text-align:center;padding:60px;color:var(--t2)"><div style="font-size:36px;margin-bottom:12px">✅</div><p style="font-weight:600">Semua sudah direview!</p><p style="font-size:12px;color:var(--t3);margin-top:6px">Tidak ada pekerjaan yang menunggu review.</p></div>`:
+    pending.map(b=>{
+      const sb=sub(b.subId);const sv_=sv(b.svId);
+      const pendSt=b.stages.find(s=>s.status==='pending');
+      return `
+      <div class="card" style="margin-bottom:12px;padding:16px">
+        <div class="flex items-center justify-between mb-12px">
+          <div class="flex items-center gap-10px">
+            <div style="font-weight:700;font-size:16px">${b.code}</div>
+            ${urgBadge(b.urgency)}
+          </div>
+          <span class="badge badge-amber">Menunggu Review</span>
+        </div>
+        ${pendSt?`
+        <div style="background:var(--bg-2);border-radius:8px;padding:12px;margin:10px 0">
+          <div style="font-size:12px;color:var(--t3);margin-bottom:4px">Tahap ${pendSt.n}</div>
+          <div style="font-weight:600">${pendSt.name}</div>
+          <div style="font-size:11px;color:var(--t2);margin-top:4px">Dikirim oleh: ${pendSt.submittedBy||'—'}</div>
+          <!-- Subtask preview -->
+          ${(pendSt.subtasks||[]).map(s=>`
+          <div style="display:flex;align-items:center;gap-6px;margin-top:6px;font-size:11px">
+            <span style="color:${s.done?'var(--green)':'var(--t3)'}">${s.done?'✓':'○'}</span>
+            <span style="color:${s.done?'var(--t1)':'var(--t3)'};margin-left:6px">${s.name}</span>
+          </div>`).join('')}
+          ${pendSt.subtasks?.some(s=>s.photo&&s.done&&typeof s.photo==='string')?`
+          <div style="margin-top:10px;display:flex;gap:6px;overflow-x:auto">
+            ${pendSt.subtasks.filter(s=>s.photo&&typeof s.photo==='string').map(s=>`<img src="${s.photo}" style="width:64px;height:48px;border-radius:4px;object-fit:cover;flex-shrink:0;cursor:pointer" onclick="viewPhoto('${s.photo}')">`).join('')}
+          </div>`:''}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="approveStage('${b.id}','${pendSt.n}')" class="btn btn-success" style="flex:1">✓ Setujui</button>
+          <button onclick="denyStage('${b.id}','${pendSt.n}')" class="btn btn-danger" style="flex:1">✗ Tolak</button>
+        </div>`:''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ================================================================
+//  MANAGER — PROGRESS
+// ================================================================
+function goProgress(){
+  const pg=document.getElementById('manager-main');
+  if(!pg)return;
+  const p=proj();if(!p)return;
+  const units=(p.canvas?.blocks||[]).filter(b=>['house','apartment','shophouse','commercial','villa'].includes(b.type));
+  const total=units.length,done=units.filter(b=>b.pct===100).length,pending=units.filter(b=>b.pending).length,overall=pct(p);
+  pg.innerHTML=`
+  <div style="display:flex;height:100%">
+    <!-- Left stats -->
+    <div class="side-panel scroll" style="width:240px">
+      <div class="panel-section">
+        <div style="font-size:11px;color:var(--t3);margin-bottom:4px">${p.code}</div>
+        <div style="font-size:36px;font-weight:800;color:${overall>=75?'var(--green)':overall>=50?'var(--accent-2)':'var(--amber)'}">${overall}%</div>
+        <div style="font-size:11px;color:var(--t2);margin-bottom:8px">progres keseluruhan</div>
+        <div class="pbar"><div class="pbar-fill ${overall>=100?'green':''}" style="width:${overall}%"></div></div>
+      </div>
+      <div class="panel-section" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+        ${[['Total',total,'var(--t2)'],['Selesai',done,'var(--green)'],['Review',pending,'var(--amber)']].map(([l,v,c])=>`<div style="background:var(--bg-2);border-radius:6px;padding:8px"><div style="font-size:18px;font-weight:700;color:${c}">${v}</div><div style="font-size:9px;color:var(--t3)">${l}</div></div>`).join('')}
+      </div>
+      <div class="panel-section">
+        <div class="panel-label">Legenda</div>
+        ${[['0%','#141720','#1E2337'],['1–24%','#1A1D2A','#2D3357'],['25–49%','#082918','#0A4A2E'],['50–74%','#054430','#0D9488'],['75–99%','#0A5545','#14B8A6'],['100%','#065F46','#34D399']].map(([l,f,s])=>`<div style="display:flex;align-items:center;gap-6px;margin-bottom:6px"><div style="width:28px;height:14px;border-radius:3px;background:${f};border:1px solid ${s};flex-shrink:0;margin-right:8px"></div><span style="font-size:11px;color:var(--t2)">${l}</span></div>`).join('')}
+        <div style="display:flex;align-items:center;gap-6px;margin-top:6px"><div class="pulse-dot" style="width:10px;height:10px;border-radius:50%;background:var(--amber);margin-right:8px"></div><span style="font-size:11px;color:var(--t2)">Menunggu review</span></div>
+      </div>
+      <div class="panel-section">
+        <div class="panel-label">Per Subkontraktor</div>
+        ${MOCK.subcontractors.map(sb=>{
+          const sbu=(p.canvas?.blocks||[]).filter(b=>b.subId===sb.id);
+          const sp=sbu.length?Math.round(sbu.reduce((a,b)=>a+(b.pct||0),0)/sbu.length):0;
+          return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="display:flex;align-items:center;gap-6px"><div style="width:8px;height:8px;border-radius:50%;background:${sb.color};margin-right:6px"></div><span style="font-size:11px;color:var(--t1);truncate;max-width:130px">${sb.name}</span></div><span style="font-size:11px;font-weight:600;color:${sb.color}">${sp}%</span></div><div class="pbar"><div style="height:100%;border-radius:2px;background:${sb.color};width:${sp}%"></div></div></div>`;
+        }).join('')}
+      </div>
+      <div class="panel-section"><button onclick="managerNav('map')" class="btn btn-ghost" style="width:100%;font-size:12px">← Kembali ke Editor</button></div>
+    </div>
+    <!-- Map -->
+    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg-base)">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:16px">
+        <div class="canvas-wrap" style="width:100%;max-width:900px;aspect-ratio:900/540">
+          <svg id="prog-svg" viewBox="0 0 900 540" style="width:100%;height:100%;display:block">
+            ${p.img?`<image href="${p.img}" x="0" y="0" width="900" height="540" preserveAspectRatio="xMidYMid slice" opacity="0.15"/>`:''}
+            <g id="prog-blocks"></g>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <!-- Unit detail -->
+    <div class="right-panel scroll" id="prog-detail"><div style="padding:24px;text-align:center;color:var(--t3);font-size:12px;margin-top:24px"><svg width="36" height="36" fill="none" stroke="var(--t3)" stroke-width="1.5" viewBox="0 0 24 24" style="display:block;margin:0 auto 10px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h4"/></svg>Klik unit di peta untuk detail</div></div>
+  </div>`;
+  setTimeout(()=>renderProgBlocks(),10);
+}
+
+function renderProgBlocks(){
+  const g=document.getElementById('prog-blocks');if(!g)return;
+  g.innerHTML=blocks().map(b=>{
+    const px=b.x*SVG_W,py=b.y*SVG_H,pw=b.width*SVG_W,ph=b.height*SVG_H;
+    const c=pgColor(b.pct);
+    const ls=Math.min(12,Math.max(8,ph/3.5));const sl=pw>35&&ph>22;
+    const glow=b.pct===100?`filter:drop-shadow(0 0 6px ${c.s}66)`:'';
+    return `<g class="block-group" data-id="${b.id}" onclick="showProgDetail('${b.id}')" style="${glow}">
+      <rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="${c.f}" stroke="${c.s}" stroke-width="1.5" rx="2.5"/>
+      ${sl?`<text x="${px+pw/2}" y="${py+ph/2}" text-anchor="middle" dominant-baseline="central" font-size="${ls}" font-family="Inter,sans-serif" font-weight="500" fill="${c.t}" pointer-events="none">${b.code}</text>`:''}
+      ${b.pct>0&&b.pct<100?`<text x="${px+pw/2}" y="${py+ph/2+ls+2}" text-anchor="middle" font-size="9" font-family="Inter,sans-serif" fill="${c.t}" opacity=".8" pointer-events="none">${b.pct}%</text>`:''}
+      ${b.urgency==='high'?`<circle cx="${px+pw-8}" cy="${py+8}" r="5" fill="var(--amber)" pointer-events="none"/>`:''}
+      ${b.urgency==='critical'?`<circle cx="${px+pw-8}" cy="${py+8}" r="5" fill="var(--red)" pointer-events="none"/>`:''}
+      ${b.pending?`<circle cx="${px+9}" cy="${py+9}" r="5" fill="var(--amber)" class="pulse-dot" pointer-events="none"/>`:''}
+    </g>`;
+  }).join('');
+}
+
+function showProgDetail(bid){
+  S.blockId=bid;S.openStages=new Set();
+  const b=block(bid);if(!b)return;
+  const d=document.getElementById('prog-detail');if(!d)return;
+  const sb=sub(b.subId),sv_=sv(b.svId);
+  d.innerHTML=`
+  <div class="panel-section">
+    <div class="flex items-center justify-between">
+      <div><div style="font-size:20px;font-weight:800">${b.code}</div><div style="font-size:11px;color:var(--t3);margin-top:2px;text-transform:capitalize">${b.type.replace('_',' ')}</div></div>
+      <div style="text-align:right">${urgBadge(b.urgency)}<div style="font-size:24px;font-weight:800;color:${pgColor(b.pct).t};margin-top:4px">${b.pct||0}%</div></div>
+    </div>
+    <div class="pbar" style="margin-top:10px"><div class="pbar-fill ${b.pct>=100?'green':''}" style="width:${b.pct||0}%"></div></div>
+  </div>
+  ${sb?`<div class="panel-section"><div class="panel-label">Subkontraktor</div><div class="flex items-center gap-2"><div style="width:24px;height:24px;border-radius:50%;background:${sb.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff">${sb.init}</div><span>${sb.name}</span></div></div>`:''}
+  ${sv_?`<div class="panel-section"><div class="panel-label">Pengawas</div><p style="font-size:13px">${sv_.name}</p><p style="font-size:11px;color:var(--t3)">${sv_.area}</p></div>`:''}
+  <div class="panel-section">
+    <div class="panel-label">Tahapan</div>
+    ${(b.stages||[]).map(st=>renderStageItem(b.id,st)).join('')}
+  </div>`;
+}
+
+// ================================================================
+//  MANAGER — SPK BUILDER
+//  Manager defines their own stages here. Nothing is pre-filled.
+//  Two paths: manual input OR upload document for AI synthesis.
+// ================================================================
+function renderSPKBuilder(){
+  const p = proj();
+  const tplStages = S.draftStages || (p?.templateStages ? JSON.parse(JSON.stringify(p.templateStages)) : []);
+  if (!S.draftStages) S.draftStages = tplStages;
+
+  return `
+  <div class="scroll" style="height:100%;padding:20px;max-width:700px;margin:0 auto">
+    <div class="flex items-center gap-3 mb-5">
+      <div>
+        <h2 style="font-size:16px;font-weight:700">Builder Tahapan Pekerjaan (SPK)</h2>
+        <p style="font-size:12px;color:var(--t3);margin-top:2px">
+          ${p ? `Proyek: ${p.code} — ` : ''}Definisikan tahap dan sub-pekerjaan sesuai SPK proyek Anda.
+        </p>
+      </div>
+      <div style="flex:1"></div>
+      <button onclick="saveDraftStages()" class="btn btn-primary" style="font-size:12px">Simpan Template</button>
+    </div>
+
+    <!-- TWO ENTRY PATHS -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
+
+      <!-- Path A: Manual -->
+      <div class="card p-4">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:18px">✏️</span>
+          <span style="font-weight:600;font-size:13px">Input Manual</span>
+        </div>
+        <p style="font-size:12px;color:var(--t3);margin-bottom:10px">Ketik nama tahap dan sub-pekerjaan langsung di bawah ini.</p>
+        <button onclick="addStage()" class="btn btn-ghost" style="width:100%;font-size:12px">
+          + Tambah tahap baru
+        </button>
+      </div>
+
+      <!-- Path B: AI synthesis -->
+      <div class="card p-4" style="border-color:var(--accent-glow)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:18px">🤖</span>
+          <span style="font-weight:600;font-size:13px">Upload Dokumen SPK</span>
+          <span class="badge badge-purple" style="font-size:10px">AI</span>
+        </div>
+        <p style="font-size:12px;color:var(--t3);margin-bottom:10px">Upload foto atau PDF dokumen SPK / RAB Anda. AI akan membaca dan menghasilkan daftar tahapan secara otomatis.</p>
+        <label id="spk-upload-zone" style="border:1px dashed rgba(124,58,237,0.4);border-radius:7px;padding:10px;display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--accent-sub);transition:all .15s" for="spk-doc-input">
+          <svg width="16" height="16" fill="none" stroke="var(--accent-2)" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span id="spk-upload-label" style="font-size:12px;color:var(--accent-2)">Pilih file (foto / PDF)</span>
+        </label>
+        <input id="spk-doc-input" type="file" accept="image/*,.pdf" style="display:none" onchange="handleSPKUpload(event)">
+      </div>
+    </div>
+
+    <!-- AI PROCESSING STATE -->
+    <div id="spk-ai-processing" style="display:none;background:var(--accent-sub);border:1px solid rgba(124,58,237,0.2);border-radius:8px;padding:14px;margin-bottom:16px;text-align:center">
+      <svg class="spin" width="24" height="24" viewBox="0 0 24 24" fill="none" style="display:inline-block;margin-bottom:8px"><circle cx="12" cy="12" r="10" stroke="rgba(124,58,237,.25)" stroke-width="3"/><path d="M12 2a10 10 0 0110 10" stroke="var(--accent-2)" stroke-width="3" stroke-linecap="round"/></svg>
+      <p style="font-size:13px;font-weight:600;color:var(--accent-2)">AI sedang membaca dokumen SPK Anda...</p>
+      <p style="font-size:12px;color:var(--t3);margin-top:4px">Hasilnya akan muncul di bawah untuk Anda review dan edit.</p>
+    </div>
+
+    <!-- STAGE LIST (editable) -->
+    <div id="spk-stage-list">
+      ${renderSPKStageList(S.draftStages)}
+    </div>
+
+    ${S.draftStages.length === 0 ? `
+    <div style="text-align:center;padding:40px;color:var(--t3);border:1px dashed var(--border-md);border-radius:var(--r)">
+      <div style="font-size:32px;margin-bottom:10px">📋</div>
+      <p style="font-size:13px;font-weight:500;margin-bottom:6px">Belum ada tahapan</p>
+      <p style="font-size:12px">Tambah tahap secara manual atau upload dokumen SPK Anda.</p>
+    </div>` : `
+    <button onclick="addStage()" style="width:100%;border:1px dashed var(--border-md);border-radius:8px;padding:10px;font-size:13px;color:var(--t3);margin-top:4px;transition:all .15s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent-2)'" onmouseout="this.style.borderColor='var(--border-md)';this.style.color='var(--t3)'">
+      + Tambah tahap
+    </button>`}
+  </div>`;
+}
+
+function renderSPKStageList(stages){
+  if(!stages || !stages.length) return '';
+  return stages.map((st, si) => `
+  <div style="background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden">
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <div style="width:26px;height:26px;border-radius:50%;background:var(--accent-sub);border:1px solid rgba(124,58,237,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--accent-2);flex-shrink:0">${String(si+1).padStart(2,'0')}</div>
+      <input value="${st.name}" placeholder="Nama tahap (mis. Pekerjaan Pondasi)" oninput="updateStageName(${si},this.value)"
+        style="flex:1;background:transparent;border:none;color:var(--t1);font-size:14px;font-weight:600;outline:none"
+        onfocus="this.style.borderBottom='1px solid var(--accent)'" onblur="this.style.borderBottom='none'">
+      <button onclick="removeStage(${si})" style="color:var(--t3);padding:4px;transition:color .15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--t3)'">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div style="padding:10px 14px">
+      ${(st.subtasks||[]).map((s,ti) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <div style="width:18px;height:18px;border-radius:3px;border:1px solid var(--border-md);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+          <svg width="10" height="10" fill="none" stroke="var(--t3)" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <input value="${s.name}" placeholder="Sub-pekerjaan (mis. Galian tanah)" oninput="updateSubtaskName(${si},${ti},this.value)"
+          style="flex:1;background:transparent;border:none;color:var(--t2);font-size:12px;outline:none">
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--t3);cursor:pointer;flex-shrink:0">
+          <input type="checkbox" ${s.requiresPhoto?'checked':''} onchange="updateSubtaskPhoto(${si},${ti},this.checked)" style="accent-color:var(--accent)">
+          Foto wajib
+        </label>
+        <button onclick="removeSubtask(${si},${ti})" style="color:var(--t3);flex-shrink:0" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--t3)'">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>`).join('')}
+      <button onclick="addSubtask(${si})" style="font-size:11px;color:var(--accent-2);padding:5px 0;display:flex;align-items:center;gap:4px;margin-top:4px">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Tambah sub-pekerjaan
+      </button>
+    </div>
+  </div>`).join('');
+}
+
+// ── SPK BUILDER ACTIONS ──
+function refreshSPKList(){
+  const el=document.getElementById('spk-stage-list');
+  if(el) el.innerHTML=renderSPKStageList(S.draftStages);
+}
+
+function addStage(){
+  if(!S.draftStages) S.draftStages=[];
+  S.draftStages.push({n:S.draftStages.length+1, name:'', subtasks:[]});
+  refreshSPKList();
+  // Focus the new name input
+  setTimeout(()=>{const inputs=document.querySelectorAll('#spk-stage-list input[placeholder="Nama tahap (mis. Pekerjaan Pondasi)"]');if(inputs.length)inputs[inputs.length-1].focus();},50);
+}
+
+function removeStage(si){
+  S.draftStages.splice(si,1);
+  S.draftStages.forEach((s,i)=>s.n=i+1);
+  refreshSPKList();
+}
+
+function addSubtask(si){
+  if(!S.draftStages[si].subtasks) S.draftStages[si].subtasks=[];
+  const n=S.draftStages[si].subtasks.length+1;
+  S.draftStages[si].subtasks.push({n, name:'', requiresPhoto:false, done:false, photo:null});
+  refreshSPKList();
+}
+
+function removeSubtask(si,ti){ S.draftStages[si].subtasks.splice(ti,1); refreshSPKList(); }
+function updateStageName(si,v){ if(S.draftStages[si]) S.draftStages[si].name=v; }
+function updateSubtaskName(si,ti,v){ if(S.draftStages[si]?.subtasks[ti]) S.draftStages[si].subtasks[ti].name=v; }
+function updateSubtaskPhoto(si,ti,v){ if(S.draftStages[si]?.subtasks[ti]) S.draftStages[si].subtasks[ti].requiresPhoto=v; }
+
+async function saveDraftStages(){
+  const p=proj();
+  if(!S.draftStages||!S.draftStages.length){toast('Tambah minimal satu tahap dulu','error');return;}
+  const empty=S.draftStages.filter(s=>!s.name.trim());
+  if(empty.length){toast('Isi nama semua tahap terlebih dahulu','error');return;}
+  if(p){
+    p.templateStages=[...S.draftStages];
+    // Apply to all units that have this template
+    (p.canvas?.blocks||[]).forEach(b=>{
+      if(!b.stages||!b.stages.length) b.stages=makeStageHistory(0, S.draftStages);
+    });
+    await API.save(p);
+  }
+  toast(`Template disimpan — ${S.draftStages.length} tahap, ${S.draftStages.reduce((a,s)=>a+(s.subtasks||[]).length,0)} sub-pekerjaan`,'success');
+}
+
+async function handleSPKUpload(event){
+  const f=event.target.files[0];if(!f)return;
+  const label=document.getElementById('spk-upload-label');
+  const proc=document.getElementById('spk-ai-processing');
+  if(label) label.textContent=`📄 ${f.name}`;
+  if(proc) proc.style.display='block';
+  // In production: send to /api/v1/spk/synthesize → Gemini reads the document
+  // Demo: simulate with mockSynthesizeDocument
+  const synthStages = await mockSynthesizeDocument(f.name);
+  if(proc) proc.style.display='none';
+  // Merge with existing or replace
+  S.draftStages = synthStages;
+  refreshSPKList();
+  toast(`AI menghasilkan ${synthStages.length} tahap dari dokumen. Review dan edit sesuai kebutuhan.`,'success');
+}
+function setupCanvas(){setTimeout(()=>{
+  const svg=document.getElementById('map-svg');if(!svg)return;
+  updateCanvas();
+  svg.addEventListener('mousedown',onSvgDown);
+  document.addEventListener('mousemove',onMMove);
+  document.addEventListener('mouseup',onMUp);
+  document.addEventListener('keydown',e=>{if((e.key==='Delete'||e.key==='Backspace')&&document.activeElement.tagName!=='INPUT')deleteBlock();});
+},20);}
+
+function updateCanvas(){
+  const g=document.getElementById('blocks-group');if(!g)return;
+  g.innerHTML=blocks().map(b=>{
+    const px=b.x*SVG_W,py=b.y*SVG_H,pw=b.width*SVG_W,ph=b.height*SVG_H;
+    const c=blockColor(b);
+    const isSel=S.blockId===b.id;
+    const ls=Math.min(12,Math.max(8,ph/3.5));const sl=pw>35&&ph>22;
+    return `<g class="block-group" data-id="${b.id}" style="cursor:${S.mode==='edit'&&S.tool==='select'?'grab':'pointer'}">
+      <rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="${c.f}" stroke="${isSel?'#9F67FF':c.s}" stroke-width="${isSel?2.5:1.5}" rx="2.5" ${isSel?'filter:drop-shadow(0 0 8px rgba(124,58,237,.5))':''}/>
+      ${sl?`<text x="${px+pw/2}" y="${py+ph/2}" text-anchor="middle" dominant-baseline="central" font-size="${ls}" font-family="Inter,sans-serif" font-weight="500" fill="${isSel?'#C4B5FD':c.t}" pointer-events="none">${b.code}</text>`:''}
+      ${b.urgency==='high'?`<circle cx="${px+pw-8}" cy="${py+8}" r="5.5" fill="var(--amber)" pointer-events="none"/>`:''}
+      ${b.urgency==='critical'?`<circle cx="${px+pw-8}" cy="${py+8}" r="5.5" fill="var(--red)" pointer-events="none"/>`:''}
+      ${b.pending?`<circle cx="${px+9}" cy="${py+9}" r="5" fill="var(--amber)" class="pulse-dot" pointer-events="none"/>`:''}
+    </g>`;
+  }).join('');
+  document.querySelectorAll('#blocks-group .block-group').forEach(el=>{
+    el.addEventListener('mousedown',e=>onBDown(e,el.dataset.id));
+    el.addEventListener('click',e=>onBClick(e,el.dataset.id));
+  });
+}
+
+function onBDown(e,bid){
+  if(S.mode!=='edit'||S.tool!=='select')return;
+  const b=block(bid);if(!b)return;
+  const svg=document.getElementById('map-svg');
+  const r=svg.getBoundingClientRect();
+  S.drag={on:true,bid,sx:e.clientX,sy:e.clientY,bx:b.x,by:b.y,sw:r.width,sh:r.height};
+  e.stopPropagation();e.preventDefault();
+}
+
+function onBClick(e,bid){
+  if(S.drag.on)return;
+  if(S.mode==='configure'){applyConfig(bid);return;}
+  S.blockId=S.blockId===bid?null:bid;
+  updateCanvas();
+  const rp=document.getElementById('right-panel');if(rp)rp.innerHTML=renderPropsPanel();
+  e.stopPropagation();
+}
+
+function applyConfig(bid){
+  const b=block(bid);if(!b||!S.paintId)return;
+  const t=S.cfgTab;
+  if(t==='sub')b.subId=S.paintId==='__clear__'?null:S.paintId;
+  else if(t==='supervisor')b.svId=S.paintId;
+  else if(t==='type')b.type=S.paintId;
+  else if(t==='urgency')b.urgency=S.paintId;
+  updateCanvas();API.save(proj());
+}
+
+function onSvgDown(e){
+  if(e.target.closest('.block-group'))return;
+  if(S.mode!=='edit'||S.tool!=='add')return;
+  const svg=document.getElementById('map-svg');
+  const r=svg.getBoundingClientRect();
+  S.draw={on:true,x0:(e.clientX-r.left)/r.width,y0:(e.clientY-r.top)/r.height};
+  S.blockId=null;updateCanvas();
+  const rp=document.getElementById('right-panel');if(rp)rp.innerHTML=renderPropsPanel();
+}
+
+function onMMove(e){
+  if(S.drag.on){
+    const d=S.drag;const b=block(d.bid);if(!b)return;
+    b.x=Math.max(0,Math.min(1-b.width,d.bx+(e.clientX-d.sx)/d.sw));
+    b.y=Math.max(0,Math.min(1-b.height,d.by+(e.clientY-d.sy)/d.sh));
+    updateCanvas();
+  }
+  if(S.draw.on){
+    const svg=document.getElementById('map-svg');if(!svg)return;
+    const r=svg.getBoundingClientRect();
+    const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+    const pv=document.getElementById('draw-prev');if(!pv)return;
+    pv.setAttribute('x',Math.min(S.draw.x0,x)*SVG_W);pv.setAttribute('y',Math.min(S.draw.y0,y)*SVG_H);
+    pv.setAttribute('width',Math.abs(x-S.draw.x0)*SVG_W);pv.setAttribute('height',Math.abs(y-S.draw.y0)*SVG_H);
+  }
+}
+
+function onMUp(e){
+  if(S.draw.on){
+    const svg=document.getElementById('map-svg');
+    if(svg){
+      const r=svg.getBoundingClientRect();
+      const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+      const w=Math.abs(x-S.draw.x0),h=Math.abs(y-S.draw.y0);
+      if(w>0.03&&h>0.03){
+        const p=proj();if(p){
+          const n=p.canvas.blocks.filter(b=>b.type==='house').length;
+          p.canvas.blocks.push({id:'b'+Date.now(),type:'house',code:`NEW-${String(n+1).padStart(2,'0')}`,x:Math.min(S.draw.x0,x),y:Math.min(S.draw.y0,y),width:w,height:h,subId:null,svId:null,urgency:'normal',pct:0,pending:false,stages:[],tplId:null});
+          updateCanvas();toast('Blok baru ditambahkan','success');
+        }
+      }
+    }
+    const pv=document.getElementById('draw-prev');if(pv){pv.setAttribute('width',0);pv.setAttribute('height',0);}
+    S.draw.on=false;
+  }
+  if(S.drag.on){S.drag.on=false;API.save(proj());}
+}
+
+function deleteBlock(){
+  if(!S.blockId)return;
+  const b=block(S.blockId);if(!b)return;
+  if(!confirm(`Hapus blok "${b.code}"?`))return;
+  const p=proj();if(!p)return;
+  p.canvas.blocks=p.canvas.blocks.filter(x=>x.id!==S.blockId);
+  S.blockId=null;updateCanvas();
+  const rp=document.getElementById('right-panel');if(rp)rp.innerHTML=renderPropsPanel();
+  toast('Blok dihapus','warn');
+}
+
+function b_set(id,k,v){const b=block(id);if(b){b[k]=v;updateCanvas();}}
+function setMode(m){S.mode=m;S.paintId=null;}
+
+// ================================================================
+//  FILE UPLOAD & DIGITIZE
+// ================================================================
+function handleDrop(e){e.preventDefault();const f=e.dataTransfer.files[0];if(f)processFile(f);}
+function handleFile(e){const f=e.target.files[0];if(f)processFile(f);}
+
+async function processFile(f){
+  if(f.size>20*1024*1024){toast('File terlalu besar (maks 20MB)','error');return;}
+  const r=new FileReader();
+  r.onload=async ev=>{
+    S.img=ev.target.result;S.studioTab='digitizing';
+    const sb=document.getElementById('studio-body');if(sb)sb.innerHTML=renderCanvasView();
+    const{data:blks}=await API.digitize(S.img);
+    const p=proj();if(p){p.canvas.blocks=blks;p.img=S.img;await API.save(p);}
+    S.studioTab='editing';S.mode='edit';S.tool='select';
+    renderStudioOnly();
+    toast(`${blks.length} blok terdeteksi. Sesuaikan jika perlu.`,'success');
+  };
+  r.readAsDataURL(f);
+}
+
+async function loadTpl(type){
+  const p=proj();if(!p)return;
+  toast('Memuat template...','info');await delay(500);
+  p.canvas.blocks=type==='grid'?mockDigitizeBlocks():buildRowTpl();
+  await API.save(p);S.studioTab='editing';S.mode='edit';renderStudioOnly();
+  toast('Template dimuat. Sesuaikan sesuai kebutuhan.','success');
+}
+
+function buildRowTpl(){
+  const b=[];
+  for(let c=0;c<4;c++){
+    b.push({id:`rt${c}`,type:'house',code:`A-0${c+1}`,x:0.03+c*0.23,y:0.08,width:0.19,height:0.25,subId:null,svId:null,urgency:'normal',pct:0,pending:false,stages:[],tplId:null});
+    b.push({id:`rt${c+4}`,type:'house',code:`B-0${c+1}`,x:0.03+c*0.23,y:0.62,width:0.19,height:0.25,subId:null,svId:null,urgency:'normal',pct:0,pending:false,stages:[],tplId:null});
+  }
+  b.push({id:'rtr',type:'road',code:'JALAN-01',x:0,y:0.39,width:1,height:0.09,subId:null,svId:null,urgency:'normal',pct:0,pending:false,stages:[]});
+  return b;
+}
+
+// ================================================================
+//  FIELD VIEW — Tampilan Pengawas (Mobile, Bahasa Indonesia)
+// ================================================================
+function renderField(){
+  const el=document.getElementById('field-main');if(!el)return;
+  if(S.fScreen==='home')el.innerHTML=renderFieldPhone(renderFHome());
+  else if(S.fScreen==='unit')el.innerHTML=renderFieldPhone(renderFUnit());
+  else if(S.fScreen==='submit')el.innerHTML=renderFieldPhone(renderFSubmit());
+  // Bind photo inputs
+  setTimeout(bindPhotoInputs,50);
+}
+
+function renderFieldPhone(content){
+  return `
+  <div class="phone-frame">
+    <div class="phone-status">
+      <span style="font-size:11px;font-weight:600">9:41</span>
+      <div style="display:flex;align-items:center;gap:4px">
+        <svg width="16" height="11" viewBox="0 0 16 11" fill="var(--t2)"><rect x="0" y="4" width="3" height="7" rx="1"/><rect x="4.5" y="2.5" width="3" height="8.5" rx="1"/><rect x="9" y="1" width="3" height="10" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".3"/></svg>
+        <svg width="14" height="10" viewBox="0 0 14 10" fill="var(--t2)"><path d="M7 2C4.6 2 2.5 3.1 1 4.8L0 3.7C1.8 1.4 4.2 0 7 0s5.2 1.4 7 3.7l-1 1.1C11.5 3.1 9.4 2 7 2zm0 4c-1.4 0-2.7.6-3.6 1.5L2.3 6.4C3.5 5.2 5.2 4.4 7 4.4s3.5.8 4.7 2l-1.1 1.1C9.7 6.6 8.4 6 7 6zm0 4c-.8 0-1.5-.3-2-.8l2-2.2 2 2.2c-.5.5-1.2.8-2 .8z"/></svg>
+        <span style="font-size:11px;font-weight:600">100%</span>
+      </div>
+    </div>
+    <div class="phone-screen">${content}</div>
+  </div>`;
+}
+
+function renderFHome(){
+  const p=S.projId?proj():S.projects[0];
+  if(!S.projId&&S.projects[0])S.projId=S.projects[0].id;
+  const myUnits=(p?.canvas?.blocks||[]).filter(b=>b.svId==='sv_1'||b.type==='house').slice(0,8);
+  return `
+  <div class="field-header">
+    <div style="flex:1">
+      <div style="font-size:10px;color:var(--t3)">Selamat pagi,</div>
+      <div style="font-weight:700;font-size:15px">Budi Santoso 👷</div>
+    </div>
+    <div style="width:32px;height:32px;border-radius:50%;background:var(--accent-sub);border:1px solid rgba(124,58,237,.3);display:flex;align-items:center;justify-content:center;font-size:14px">B</div>
+  </div>
+  <div class="field-content" style="padding:12px">
+    <!-- Project selector -->
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap-8px;justify-content:space-between">
+      <div><div style="font-size:10px;color:var(--t3)">Proyek aktif</div><div style="font-weight:600;font-size:13px">${p?.name||'–'}</div></div>
+      <span class="badge badge-green" style="font-size:10px">Aktif</span>
+    </div>
+
+    <!-- QR & Search -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <button onclick="toast('Fitur scan QR hadir berikutnya','info')" style="background:var(--accent);border-radius:8px;padding:11px;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;font-size:13px;color:#fff">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><rect x="18" y="14" width="3" height="3"/><rect x="14" y="18" width="3" height="3"/></svg>
+        Scan QR
+      </button>
+      <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:11px;display:flex;align-items:center;gap:6px">
+        <svg width="14" height="14" fill="none" stroke="var(--t3)" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span style="font-size:12px;color:var(--t3)">Cari unit...</span>
+      </div>
+    </div>
+
+    <!-- Unit list -->
+    <div style="font-size:10px;font-weight:600;letter-spacing:.07em;color:var(--t3);text-transform:uppercase;margin-bottom:8px">Unit Ditugaskan (${myUnits.length})</div>
+    ${myUnits.map(b=>{
+      const activeStage=b.stages?.find(s=>s.status==='in_progress'||s.status==='pending')||b.stages?.find(s=>s.status==='not_started');
+      const doneCount=b.stages?.filter(s=>s.status==='approved').length||0;
+      const statusColor=b.pct===100?'var(--green)':b.pending?'var(--amber)':'var(--t3)';
+      const statusLabel=b.pct===100?'Selesai':b.pending?'Menunggu review':b.pct>0?'Sedang berjalan':'Belum mulai';
+      return `
+      <div class="unit-card-f" onclick="openFUnit('${b.id}')">
+        <div class="unit-code-tag">
+          <div class="unit-code-big" style="color:var(--accent-2);font-size:11px">${b.code}</div>
+          <div style="font-size:8px;color:var(--t3)">Tipe 36</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <span style="font-weight:600;font-size:13px">${b.code}</span>
+            <span style="font-size:12px;font-weight:700;color:${statusColor}">${b.pct||0}%</span>
+          </div>
+          <div class="pbar" style="margin-bottom:4px"><div class="pbar-fill" style="width:${b.pct||0}%;background:${statusColor}"></div></div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="status-dot" style="background:${statusColor}"></div>
+            <span style="font-size:11px;color:${statusColor}">${statusLabel}</span>
+          </div>
+        </div>
+        <svg width="16" height="16" fill="none" stroke="var(--t3)" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function openFUnit(id){S.fUnitId=id;S.fScreen='unit';S.fActiveStage=null;renderField();}
+
+function renderFUnit(){
+  const b=block(S.fUnitId);if(!b)return renderFHome();
+  const activeIdx=b.stages?.findIndex(s=>s.status!=='approved')||0;
+  const active=b.stages?.[activeIdx>=0?activeIdx:0];
+  if(!S.fActiveStage)S.fActiveStage=active?.n||1;
+  const activeSt=b.stages?.find(s=>s.n===S.fActiveStage)||b.stages?.[0];
+
+  return `
+  <div class="field-header">
+    <button class="field-back" onclick="S.fScreen='home';renderField()">
+      <svg width="16" height="16" fill="none" stroke="var(--t2)" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <div style="flex:1">
+      <div style="font-weight:700;font-size:15px">${b.code}</div>
+      <div style="font-size:10px;color:var(--t3)">Blok ${b.code[0]} — Tipe 36</div>
+    </div>
+    <div style="font-size:20px;font-weight:800;color:${pgColor(b.pct).t}">${b.pct||0}%</div>
+  </div>
+  <div class="field-content">
+    <!-- Progress bar -->
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:6px">
+        <span>Progres keseluruhan</span>
+        <span>${b.stages?.filter(s=>s.status==='approved').length||0} / ${b.stages?.length||0} tahap</span>
+      </div>
+      <div class="pbar" style="height:6px"><div class="pbar-fill ${b.pct>=100?'green':''}" style="width:${b.pct||0}%"></div></div>
+    </div>
+
+    <!-- Stages list -->
+    <div style="font-size:10px;font-weight:600;letter-spacing:.07em;color:var(--t3);text-transform:uppercase;margin-bottom:8px">Tahapan Pekerjaan</div>
+    ${(b.stages||[]).map(st=>{
+      const sc={approved:'var(--green)',pending:'var(--amber)',not_started:'var(--t3)'}[st.status];
+      const sl={approved:'Disetujui ✓',pending:'Menunggu review',not_started:'Belum mulai'}[st.status];
+      const isActive=S.fActiveStage===st.n;
+      return `
+      <div style="background:${isActive?'rgba(124,58,237,.08)':'var(--bg-2)'};border:1px solid ${isActive?'rgba(124,58,237,.3)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:all .15s" onclick="S.fActiveStage=${st.n};renderField()">
+        <div style="display:flex;align-items:center;gap-8px;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:24px;height:24px;border-radius:50%;background:${sc==='var(--green)'?'rgba(16,185,129,.15)':sc==='var(--amber)'?'rgba(245,158,11,.15)':'var(--bg-3)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:${sc}">${String(st.n).padStart(2,'0')}</div>
+            <div><div style="font-size:13px;font-weight:${isActive?'600':'500'}">${st.name}</div><div style="font-size:10px;color:${sc};margin-top:1px">${sl}</div></div>
+          </div>
+          ${st.status==='not_started'&&st.n===activeIdx+1?`<span class="badge badge-purple" style="font-size:10px">Aktif</span>`:
+            st.status==='pending'?`<span class="badge badge-amber" style="font-size:10px">Review</span>`:''}
+          <svg width="14" height="14" fill="none" stroke="var(--t3)" stroke-width="2" viewBox="0 0 24 24" style="transform:${isActive?'rotate(90deg)':'none'};transition:transform .2s"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        ${isActive&&activeSt?(renderFStageDetail(activeSt,b.id)):''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderFStageDetail(st, bid){
+  if(st.status==='approved') return `<div style="background:rgba(16,185,129,.08);border-radius:6px;padding:8px;margin-top:8px;font-size:12px;color:var(--green);display:flex;align-items:center;gap:6px"><span>✓</span>Tahap ini sudah disetujui oleh ${st.reviewedBy||'Koordinator'}</div>`;
+
+  return `
+  <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+    <div style="font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--t3);text-transform:uppercase;margin-bottom:8px">${st.status==='pending'?'Menunggu review':'Checklist Pekerjaan'}</div>
+    ${(st.subtasks||[]).map((s,i)=>{
+      const photoKey=`${bid}_${st.n}_${i}`;
+      const hasPhoto=S.fPhotos[photoKey]||s.photo;
+      return `
+      <div class="subtask-f ${s.done?'done-task':st.status==='not_started'?'active-task':''}" style="margin-bottom:6px">
+        <div style="display:flex;align-items:flex-start;gap:8px">
+          <button class="check-circle ${s.done?'done':''}" onclick="toggleFCheck('${bid}','${st.n}','${i}',this)" style="flex-shrink:0;margin-top:1px">
+            ${s.done?`<svg width="12" height="12" fill="none" stroke="#fff" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`:''}
+          </button>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500;margin-bottom:${s.photo?'6px':'0'}">${s.name}${s.photo?'<span style="color:var(--accent-2);font-size:10px;margin-left:4px">*foto wajib</span>':''}</div>
+            ${s.photo?`
+            <label class="photo-upload-area" for="photo-inp-${photoKey}">
+              ${hasPhoto?`<img src="${typeof hasPhoto==='string'?hasPhoto:''}" class="mini-photo" style="${!hasPhoto||hasPhoto===true?'display:none':''}">
+              <span style="font-size:11px;color:var(--green)">✓ Foto diunggah</span>`:`
+              <svg width="14" height="14" fill="none" stroke="var(--t2)" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              <span style="font-size:12px;color:var(--t2)">Ambil foto</span>`}
+            </label>
+            <input id="photo-inp-${photoKey}" type="file" accept="image/*" capture="environment" style="display:none" data-key="${photoKey}" onchange="handleFPhoto(event,'${photoKey}','${bid}','${st.n}','${i}')">
+            `:''}
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+    ${st.status==='not_started'?`
+    <button onclick="S.fScreen='submit';S.fActiveStage=${st.n};renderField()" class="field-action-btn primary" style="margin-top:10px;font-size:13px;padding:12px">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Kirim ke Review
+    </button>`:
+    st.status==='pending'?`<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:8px;margin-top:8px;font-size:12px;color:var(--amber);text-align:center">⏳ Menunggu persetujuan Koordinator</div>`:``}
+  </div>`;
+}
+
+function renderFSubmit(){
+  const b=block(S.fUnitId);if(!b)return renderFHome();
+  const st=b.stages?.find(s=>s.n===S.fActiveStage);if(!st)return renderFUnit();
+  const photoKeys=(st.subtasks||[]).filter(s=>s.photo).map((_,i)=>`${S.fUnitId}_${st.n}_${i}`);
+  const allPhotos=photoKeys.every(k=>S.fPhotos[k]);
+  const reqPhotos=photoKeys.length;
+
+  return `
+  <div class="field-header">
+    <button class="field-back" onclick="S.fScreen='unit';renderField()">
+      <svg width="16" height="16" fill="none" stroke="var(--t2)" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <div style="flex:1">
+      <div style="font-weight:700;font-size:14px">${st.name}</div>
+      <div style="font-size:10px;color:var(--t3)">Unit ${b.code} · Tahap ${st.n}</div>
+    </div>
+  </div>
+  <div class="field-content">
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">Centang semua pekerjaan yang selesai dan unggah foto bukti.</div>
+      ${(st.subtasks||[]).map((s,i)=>{
+        const photoKey=`${S.fUnitId}_${st.n}_${i}`;
+        const hasPhoto=S.fPhotos[photoKey];
+        const isDone=S.fChecked.has(photoKey)||s.done;
+        return `
+        <div class="subtask-f ${isDone?'done-task':'active-task'}">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <button class="check-circle ${isDone?'done':''}" onclick="S.fChecked.has('${photoKey}')?S.fChecked.delete('${photoKey}'):S.fChecked.add('${photoKey}');renderField()" style="flex-shrink:0;margin-top:2px">
+              ${isDone?`<svg width="12" height="12" fill="none" stroke="#fff" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`:''}
+            </button>
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:500;margin-bottom:${s.photo?'6px':'0'}">${s.name}</div>
+              ${s.photo?`
+              <label class="photo-upload-area" for="su-photo-${photoKey}">
+                ${hasPhoto?`<img src="${hasPhoto}" class="mini-photo"><span style="font-size:11px;color:var(--green)">✓ Foto tersimpan</span>`:
+                `<svg width="16" height="16" fill="none" stroke="var(--t2)" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span style="font-size:12px;color:var(--t2)">Ambil foto bukti</span>`}
+              </label>
+              <input id="su-photo-${photoKey}" type="file" accept="image/*" capture="environment" style="display:none" onchange="handleFPhoto(event,'${photoKey}','${S.fUnitId}','${st.n}','${i}')">
+              `:''}
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--t3);margin-bottom:6px">Catatan (opsional)</div>
+      <textarea class="inp" rows="3" placeholder="Tambahkan catatan jika ada..." style="resize:none"></textarea>
+    </div>
+
+    ${reqPhotos>0?`<div style="font-size:11px;color:${allPhotos?'var(--green)':'var(--amber)'};text-align:center;margin-bottom:8px">${allPhotos?'✓ Semua foto sudah diunggah':'⚠ '+reqPhotos+' foto bukti diperlukan'}</div>`:''}
+  </div>
+  <div class="field-bottom">
+    <button onclick="submitFStage()" class="field-action-btn ${allPhotos||reqPhotos===0?'primary':'disabled'}">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Kirim ke Review
+    </button>
+  </div>`;
+}
+
+async function submitFStage(){
+  const b=block(S.fUnitId);if(!b)return;
+  const st=b.stages?.find(s=>s.n===S.fActiveStage);if(!st)return;
+  toast('Mengirim laporan...','info');
+  await delay(800);
+  st.status='pending';st.submittedBy='Budi Santoso';st.date=new Date().toISOString().slice(0,10);
+  st.subtasks?.forEach((s,i)=>{s.done=true;if(S.fPhotos[`${S.fUnitId}_${st.n}_${i}`])s.photo=S.fPhotos[`${S.fUnitId}_${st.n}_${i}`];});
+  b.pending=true;
+  API.save(proj());
+  S.fScreen='unit';S.fChecked=new Set();
+  renderField();
+  toast('Laporan terkirim! Menunggu review Koordinator.','success');
+}
+
+function toggleFCheck(bid,stagn,idx,btn){
+  const key=`${bid}_${stagn}_${idx}`;
+  if(S.fChecked.has(key)){S.fChecked.delete(key);btn.classList.remove('done');btn.innerHTML='';}
+  else{S.fChecked.add(key);btn.classList.add('done');btn.innerHTML=`<svg width="12" height="12" fill="none" stroke="#fff" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`;}
+}
+
+function handleFPhoto(event,key,bid,stagn,idx){
+  const f=event.target.files[0];if(!f)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    S.fPhotos[key]=e.target.result;
+    const b=block(bid);
+    if(b&&b.stages){const st=b.stages.find(s=>s.n==stagn);if(st&&st.subtasks[idx])st.subtasks[idx].photo=e.target.result;}
+    renderField();
+    toast('Foto berhasil diunggah','success');
+  };
+  reader.readAsDataURL(f);
+}
+
+function bindPhotoInputs(){
+  document.querySelectorAll('input[type="file"][data-key]').forEach(inp=>{
+    inp.addEventListener('change',e=>{
+      const key=inp.dataset.key;
+      const f=e.target.files[0];if(!f)return;
+      const reader=new FileReader();
+      reader.onload=ev=>{S.fPhotos[key]=ev.target.result;renderField();toast('Foto tersimpan','success');};
+      reader.readAsDataURL(f);
+    });
+  });
+}
+
+// ================================================================
+//  MODALS
+// ================================================================
+function showNewProjectModal(){
+  const m=document.getElementById('modal-np');m.style.display='flex';m.classList.remove('hidden');
+  setTimeout(()=>document.getElementById('np-name')?.focus(),50);
+}
+function closeModal(){const m=document.getElementById('modal-np');m.style.display='none';}
+
+async function createProject(){
+  const name=document.getElementById('np-name')?.value?.trim();
+  const code=document.getElementById('np-code')?.value?.trim()?.toUpperCase();
+  if(!name||!code){toast('Isi semua kolom','error');return;}
+  const p={id:'p_'+Date.now(),code,name,status:'setup',canvas:{blocks:[]},img:null,created:new Date().toISOString().slice(0,10)};
+  S.projects.push(p);await API.save(p);
+  closeModal();S.projId=p.id;S.studioTab='upload';
+  managerNav('map');
+  toast('Proyek dibuat','success');
+}
+
+// ================================================================
+//  INIT
+// ================================================================
+async function init(){
+  const{data:projects}=await API.list();
+  S.projects=projects;
+  S.projId=projects[0]?.id||null;
+  if(S.projId){const p=projects[0];document.getElementById('nav-ctx').innerHTML=`<span style="color:var(--accent-2);font-weight:600">${p.code}</span><span style="color:var(--t3)">—</span><span>${p.name}</span>`;}
+  renderManagerPage();
+}
+
+init();
+</script>
+</body>
+</html>
