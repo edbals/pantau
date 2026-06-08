@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, use } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
+import GridSizePicker from '@/components/map/GridSizePicker'
 import {
   validateUnitCodes,
   generateGridCodes,
@@ -483,12 +484,20 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           {gridRect && (
             <div className="absolute inset-0 flex items-center justify-center"
               style={{ background: 'rgba(8,10,16,0.6)', backdropFilter: 'blur(2px)' }}>
-              <div className="rounded-xl p-5 w-72"
+              <div className="rounded-xl p-5 w-80 max-h-[90vh] overflow-auto"
                 style={{ background: 'var(--bg-1)', border: '1px solid var(--border-md)' }}>
                 <h3 className="font-semibold text-sm mb-1" style={{ color: 'var(--t1)' }}>⊞ Buat Grid Blok</h3>
-                <p className="text-[11px] mb-4" style={{ color: 'var(--t3)' }}>
-                  Isi area yang digambar dengan grid unit berlabel otomatis
+                <p className="text-[11px] mb-3" style={{ color: 'var(--t3)' }}>
+                  Seret pada kotak di bawah untuk pilih jumlah baris × kolom
                 </p>
+
+                <div className="mb-4">
+                  <GridSizePicker
+                    rows={parseInt(gridRows) || 1}
+                    cols={parseInt(gridCols) || 1}
+                    onChange={(r, c) => { setGridRows(String(r)); setGridCols(String(c)) }}
+                  />
+                </div>
 
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>

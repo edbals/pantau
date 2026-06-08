@@ -39,19 +39,23 @@ interface Props {
   onGridRect?: (rect: GridRect) => void  // fired when grid tool finishes drawing
 }
 
+// Blueprint / CAD palette — thin cool-toned hairlines on navy, light fills.
+const BLUEPRINT_BG = '#0A1628'
 const TYPE_STYLE: Record<UnitType, { stroke: string; fill: string; dash?: string }> = {
-  house:       { stroke: '#60A5FA', fill: 'rgba(59,130,246,0.18)' },
-  apartment:   { stroke: '#60A5FA', fill: 'rgba(59,130,246,0.18)' },
-  villa:       { stroke: '#60A5FA', fill: 'rgba(59,130,246,0.18)' },
-  shophouse:   { stroke: '#FCD34D', fill: 'rgba(245,158,11,0.18)' },
-  commercial:  { stroke: '#FCD34D', fill: 'rgba(245,158,11,0.18)' },
-  road:        { stroke: '#9CA3AF', fill: 'rgba(107,114,128,0.25)', dash: '4,3' },
-  common_area: { stroke: '#34D399', fill: 'rgba(16,185,129,0.20)', dash: '4,3' },
-  parking:     { stroke: '#9CA3AF', fill: 'rgba(107,114,128,0.18)', dash: '4,3' },
-  facility:    { stroke: '#9CA3AF', fill: 'rgba(107,114,128,0.18)', dash: '4,3' },
-  drainage:    { stroke: '#9CA3AF', fill: 'rgba(107,114,128,0.18)', dash: '4,3' },
-  boundary:    { stroke: '#9CA3AF', fill: 'transparent', dash: '6,4' },
+  house:       { stroke: '#5FD0F0', fill: 'rgba(95,208,240,0.05)' },
+  apartment:   { stroke: '#5FD0F0', fill: 'rgba(95,208,240,0.05)' },
+  villa:       { stroke: '#5FD0F0', fill: 'rgba(95,208,240,0.05)' },
+  shophouse:   { stroke: '#F2C572', fill: 'rgba(242,197,114,0.05)' },
+  commercial:  { stroke: '#F2C572', fill: 'rgba(242,197,114,0.05)' },
+  road:        { stroke: 'rgba(150,185,225,0.55)', fill: 'rgba(150,185,225,0.06)', dash: '5,3' },
+  common_area: { stroke: '#6FE7C0', fill: 'rgba(111,231,192,0.06)', dash: '5,3' },
+  parking:     { stroke: 'rgba(150,185,225,0.45)', fill: 'rgba(150,185,225,0.05)', dash: '5,3' },
+  facility:    { stroke: 'rgba(150,185,225,0.45)', fill: 'rgba(150,185,225,0.05)', dash: '5,3' },
+  drainage:    { stroke: 'rgba(150,185,225,0.45)', fill: 'rgba(150,185,225,0.05)', dash: '5,3' },
+  boundary:    { stroke: 'rgba(150,185,225,0.5)', fill: 'transparent', dash: '7,4' },
 }
+
+const GRID_PX = 22  // dot-grid spacing & snap step (screen px)
 
 function progressColor(pct: number) {
   if (pct === 0) return 'transparent'
@@ -164,10 +168,13 @@ export default function MapCanvas({
         return
       }
 
+      // Snap a screen-pixel delta to the grid (Alt bypasses).
+      const snapPx = (v: number) => e.altKey ? v : Math.round(v / GRID_PX) * GRID_PX
+
       if (resizing.current) {
         const { id, handle, ox, oy, ow, oh, sx, sy } = resizing.current
-        const dx = (x - sx) / frame.w
-        const dy = (y - sy) / frame.h
+        const dx = snapPx(x - sx) / frame.w
+        const dy = snapPx(y - sy) / frame.h
         let nx = ox, ny = oy, nw = ow, nh = oh
 
         if (handle.includes('e')) nw = ow + dx
@@ -199,8 +206,9 @@ export default function MapCanvas({
       }
       if (dragging.current) {
         const { ids, origins, sx, sy } = dragging.current
-        const dx = (x - sx) / frame.w
-        const dy = (y - sy) / frame.h
+        // Snap the movement delta so a group keeps its internal spacing.
+        const dx = snapPx(x - sx) / frame.w
+        const dy = snapPx(y - sy) / frame.h
         const idSet = new Set(ids)
         onChange(units.map(u => {
           if (!idSet.has(u.id)) return u
@@ -217,8 +225,14 @@ export default function MapCanvas({
           const rect = svg.getBoundingClientRect()
           const rawX = e.clientX - rect.left
           const rawY = e.clientY - rect.top
-          const { x, y } = clampToFrame(rawX, rawY, frame)
-          const { startX, startY } = drawing.current
+          const clamped = clampToFrame(rawX, rawY, frame)
+          // Snap both corners to the dot grid for clean, aligned blocks (Alt bypasses).
+          const snapAxis = (v: number, origin: number) =>
+            e.altKey ? v : origin + Math.round((v - origin) / GRID_PX) * GRID_PX
+          const x = snapAxis(clamped.x, frame.x)
+          const y = snapAxis(clamped.y, frame.y)
+          const startX = snapAxis(drawing.current.startX, frame.x)
+          const startY = snapAxis(drawing.current.startY, frame.y)
           const nw = Math.abs(x - startX) / frame.w
           const nh = Math.abs(y - startY) / frame.h
           if (nw > 0.015 && nh > 0.015) {
@@ -352,7 +366,9 @@ export default function MapCanvas({
         style={{
           display: 'block',
           cursor: (tool === 'draw' || tool === 'grid') ? 'crosshair' : tool === 'delete' ? 'not-allowed' : 'default',
-          background: 'repeating-linear-gradient(0deg,transparent,transparent 23px,rgba(255,255,255,.02) 24px),repeating-linear-gradient(90deg,transparent,transparent 23px,rgba(255,255,255,.02) 24px)',
+          background: BLUEPRINT_BG,
+          backgroundImage: `radial-gradient(rgba(130,175,235,0.16) 1px, transparent 1.4px)`,
+          backgroundSize: `${GRID_PX}px ${GRID_PX}px`,
           userSelect: 'none',
         }}
         onMouseDown={handleSvgMouseDown}
@@ -393,11 +409,11 @@ export default function MapCanvas({
 
               {/* Unit body */}
               <rect x={px} y={py} width={pw} height={ph}
-                fill={fillColor}
-                stroke={isSelected ? 'var(--accent)' : style.stroke}
-                strokeWidth={isSelected ? 2.5 : 1.5}
+                fill={isSelected ? 'rgba(191,239,255,0.10)' : fillColor}
+                stroke={isSelected ? '#BFEFFF' : style.stroke}
+                strokeWidth={isSelected ? 2 : 1}
                 strokeDasharray={style.dash}
-                rx={2}
+                rx={1}
               />
 
               {/* Progress fill overlay (PM view) */}
@@ -458,21 +474,23 @@ export default function MapCanvas({
                     { k: 'sw', hx: px,          hy: py + ph,     cursor: 'nesw-resize' },
                     { k: 'w',  hx: px,          hy: py + ph / 2, cursor: 'ew-resize' },
                   ] as const).map(h => (
-                    <rect key={h.k} x={h.hx - 5} y={h.hy - 5} width={10} height={10}
-                      fill="var(--accent)" stroke="#fff" strokeWidth={1.5} rx={2}
+                    <rect key={h.k} x={h.hx - 4.5} y={h.hy - 4.5} width={9} height={9}
+                      fill="#BFEFFF" stroke="#0A1628" strokeWidth={1.5} rx={1.5}
                       style={{ cursor: h.cursor }}
                       onMouseDown={e => handleResizeStart(e, u.id, h.k)} />
                   ))}
                 </>
               )}
 
-              {/* Unit label */}
-              {pw > 24 && ph > 16 && (
+              {/* Unit label — monospace, blueprint ink */}
+              {pw > 20 && ph > 14 && (
                 <text x={px + pw / 2} y={py + ph / 2 + 4}
                   textAnchor="middle"
-                  fontSize={Math.max(8, Math.min(12, pw / 6))}
-                  fill="rgba(240,244,255,0.85)"
-                  fontWeight="600"
+                  fontSize={Math.max(9, Math.min(13, pw / 5))}
+                  fill={isSelected ? '#EAF7FF' : 'rgba(207,232,255,0.88)'}
+                  fontWeight="500"
+                  fontFamily="ui-monospace, 'SF Mono', Menlo, monospace"
+                  letterSpacing="0.3"
                   style={{ pointerEvents: 'none' }}>
                   {u.label ?? u.unit_code}
                 </text>
@@ -484,9 +502,9 @@ export default function MapCanvas({
         {/* Draw draft rectangle */}
         {draft && draft.w > 2 && draft.h > 2 && (
           <rect x={draft.x} y={draft.y} width={draft.w} height={draft.h}
-            fill="rgba(124,58,237,0.12)"
-            stroke="var(--accent)" strokeWidth={1.5}
-            strokeDasharray="6,3" rx={2}
+            fill="rgba(95,208,240,0.10)"
+            stroke="#5FD0F0" strokeWidth={1.5}
+            strokeDasharray="6,3" rx={1}
             style={{ pointerEvents: 'none' }}
           />
         )}
