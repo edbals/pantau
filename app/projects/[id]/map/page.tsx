@@ -96,6 +96,14 @@ const URGENCY_OPTIONS = [
   { value: 'critical', label: 'Kritis', color: 'var(--red)' },
 ]
 
+// Infrastructure (roads, fasos/fasum, parking, etc.) is not a sellable unit and
+// must not be tallied in the unit count.
+const INFRASTRUCTURE_TYPES = new Set<UnitType>([
+  'road', 'common_area', 'parking', 'facility', 'drainage', 'boundary',
+])
+const isSellableUnit = (u: CanvasUnit) => !INFRASTRUCTURE_TYPES.has(u.unit_type)
+const countSellableUnits = (units: CanvasUnit[]) => units.filter(isSellableUnit).length
+
 const SUB_COLORS = ['#7C3AED','#3B82F6','#10B981','#F59E0B','#EF4444','#EC4899','#14B8A6','#F97316']
 
 export default function MapPage({ params }: { params: Promise<{ id: string }> }) {
@@ -277,7 +285,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         }))
         setIsDirty(true)
         setUnits(mapped)
-        setDetectCount(mapped.length)
+        setDetectCount(countSellableUnits(mapped))
       } else {
         setDetectCount(0)
       }
@@ -327,6 +335,17 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const color = SUB_COLORS[subs.length % SUB_COLORS.length]
     setSubs(prev => [...prev, { name: subName.trim(), color }])
     setSubName('')
+  }
+
+  function deleteSub(index: number) {
+    const removed = subs[index]
+    if (!removed) return
+    setSubs(prev => prev.filter((_, i) => i !== index))
+    // Unassign this subkon's colour from any units that were assigned to it.
+    setUnits(prev => prev.map(u =>
+      u.subcontractor_color === removed.color ? { ...u, subcontractor_color: undefined } : u
+    ))
+    setIsDirty(true)
   }
 
   function goLive() {
@@ -442,8 +461,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
 
           <div className="text-center px-1">
-            <div className="text-[13px] font-bold" style={{ color: 'var(--t1)' }}>{units.length}</div>
+            <div className="text-[13px] font-bold" style={{ color: 'var(--t1)' }}>{countSellableUnits(units)}</div>
             <div className="text-[8px]" style={{ color: 'var(--t3)' }}>unit</div>
+            {units.length > countSellableUnits(units) && (
+              <div className="text-[8px] mt-0.5" style={{ color: 'var(--t3)' }}>
+                +{units.length - countSellableUnits(units)} area
+              </div>
+            )}
           </div>
         </div>
 
@@ -746,18 +770,37 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     className="px-3 py-1.5 rounded text-[12px] font-semibold text-white"
                     style={{ background: 'var(--accent)' }}>+</button>
                 </div>
-                {subs.map((s, i) => (
-                  <button key={i} onClick={() => selected && updateSelected({ subcontractor_color: s.color })}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
-                    style={{
-                      background: selected?.subcontractor_color === s.color ? 'var(--bg-3)' : 'var(--bg-2)',
-                      border: `1px solid ${selected?.subcontractor_color === s.color ? s.color : 'var(--border)'}`,
-                      color: 'var(--t1)',
-                    }}>
-                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: s.color }} />
-                    {s.name}
-                  </button>
-                ))}
+                {subs.map((s, i) => {
+                  const assignedCount = units.filter(u => u.subcontractor_color === s.color).length
+                  return (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <button onClick={() => selected && updateSelected({ subcontractor_color: s.color })}
+                        className="flex-1 flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
+                        style={{
+                          background: selected?.subcontractor_color === s.color ? 'var(--bg-3)' : 'var(--bg-2)',
+                          border: `1px solid ${selected?.subcontractor_color === s.color ? s.color : 'var(--border)'}`,
+                          color: 'var(--t1)',
+                        }}>
+                        <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                        <span className="flex-1 text-left truncate">{s.name}</span>
+                        {assignedCount > 0 && (
+                          <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--t3)' }}>{assignedCount}</span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (assignedCount === 0 || confirm(`Hapus "${s.name}"? ${assignedCount} unit akan kehilangan subkon.`)) {
+                            deleteSub(i)
+                          }
+                        }}
+                        title="Hapus subkon"
+                        className="px-2 py-2 rounded-lg text-[12px] flex-shrink-0"
+                        style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
                 {subs.length === 0 && (
                   <p className="text-[11px] text-center" style={{ color: 'var(--t3)' }}>
                     Tambahkan subkontraktor di atas

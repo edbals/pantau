@@ -233,7 +233,9 @@ export function expandGridToUnits(grid: DetectedGrid): DetectedUnit[] {
       units.push({
         temp_id: `${temp_id}_r${r}_c${c}`,
         type: 'house',
-        label_detected: code,
+        // The generated code IS the unit code; the custom label is left empty
+        // for a human-friendly name (e.g. "Rumah Hook"), not a copy of the code.
+        label_detected: null,
         suggested_code: code,
         coordinates: {
           x: clamp01(bounding_box.x + c * cellW),

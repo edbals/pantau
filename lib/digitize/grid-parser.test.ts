@@ -166,6 +166,11 @@ describe('expandGridToUnits — math', () => {
     expect(units.map(u => u.suggested_code)).toEqual(['3J-21', '3J-22'])
   })
 
+  test('leaves the custom label empty (code is not copied into label)', () => {
+    const units = expandGridToUnits(grid)
+    expect(units.every(u => u.label_detected === null)).toBe(true)
+  })
+
   test('lays cells out without overlap, normalized', () => {
     const units = expandGridToUnits(grid)
     // cellW = 0.6/3 = 0.2, cellH = 0.4/2 = 0.2
