@@ -571,16 +571,15 @@ export default function MapCanvas({
                 </>
               )}
 
-              {/* Unit label — monospace blueprint ink, auto-fit + rotated
-                  vertically in tall/narrow lots so it never overflows. */}
+              {/* Unit label — always horizontal, shrunk to fit the cell width
+                  (monospace ≈ 0.6em per char). Hidden if it would be too tiny. */}
               {(() => {
                 const text = u.label ?? u.unit_code
                 if (!text) return null
-                const horizontal = pw >= ph
-                const along = horizontal ? pw : ph   // length available for the text
-                const across = horizontal ? ph : pw  // thickness perpendicular to it
-                if (across < 11 || along < 22) return null
-                const fontSize = Math.max(7, Math.min(13, Math.min(across * 0.5, (along * 1.5) / text.length)))
+                const byWidth = (pw * 0.86) / (text.length * 0.6)
+                const byHeight = ph * 0.62
+                const fontSize = Math.min(13, byWidth, byHeight)
+                if (fontSize < 6) return null
                 return (
                   <text x={cx} y={cy}
                     textAnchor="middle" dominantBaseline="central"
@@ -588,7 +587,6 @@ export default function MapCanvas({
                     fill={isSelected ? '#EAF7FF' : 'rgba(207,232,255,0.9)'}
                     fontWeight="500"
                     fontFamily="ui-monospace, 'SF Mono', Menlo, monospace"
-                    transform={horizontal ? undefined : `rotate(-90 ${cx} ${cy})`}
                     style={{ pointerEvents: 'none' }}>
                     {text}
                   </text>
