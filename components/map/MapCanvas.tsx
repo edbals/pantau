@@ -87,11 +87,10 @@ function containFrame(containerW: number, containerH: number, imageW: number, im
   return { x: (containerW - w) / 2, y: (containerH - h) / 2, w, h }
 }
 
-function clampToFrame(x: number, y: number, frame: { x: number; y: number; w: number; h: number }) {
-  return {
-    x: Math.max(frame.x, Math.min(frame.x + frame.w, x)),
-    y: Math.max(frame.y, Math.min(frame.y + frame.h, y)),
-  }
+// Clamp a point to the visible SVG viewport so units can be drawn anywhere on
+// the canvas — including below/around the background image, not just inside it.
+function clampToBox(x: number, y: number, w: number, h: number) {
+  return { x: Math.max(0, Math.min(w, x)), y: Math.max(0, Math.min(h, y)) }
 }
 
 export default function MapCanvas({
@@ -123,7 +122,7 @@ export default function MapCanvas({
 
   // Effective selection: multi-select prop wins; otherwise the single id.
   const selection = selectedIds ?? (selectedId ? [selectedId] : [])
-  const selectionSet = useMemo(() => new Set(selection), [selection.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
+  const selectionSet = new Set(selection)
   const emitSelection = (ids: string[]) => {
     if (onSelectionChange) onSelectionChange(ids)
     else onSelect?.(ids[ids.length - 1] ?? null)
@@ -147,7 +146,7 @@ export default function MapCanvas({
 
   // Always-current view, so the (passive-safe) wheel listener avoids stale state.
   const viewRef = useRef({ zoom, pan })
-  viewRef.current = { zoom, pan }
+  useEffect(() => { viewRef.current = { zoom, pan } }, [zoom, pan])
 
   const ZOOM_MIN = 0.3
   const ZOOM_MAX = 6
@@ -180,6 +179,7 @@ export default function MapCanvas({
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset the view when a new background (re-digitize) loads.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [bgImageUrl])
 
   // Measure the container, not the SVG (avoids chicken-and-egg sizing)
@@ -257,7 +257,7 @@ export default function MapCanvas({
       }
 
       if (drawing.current) {
-        const point = clampToFrame(x, y, frame)
+        const point = clampToBox(x, y, svgSize.w, svgSize.h)
         const { startX, startY } = drawing.current
         setDraft({
           x: Math.min(startX, point.x), y: Math.min(startY, point.y),
@@ -273,7 +273,8 @@ export default function MapCanvas({
         onChange(units.map(u => {
           if (!idSet.has(u.id)) return u
           const o = origins[u.id]
-          return { ...u, x: Math.max(0, Math.min(1 - u.width, o.x + dx)), y: Math.max(0, Math.min(1 - u.height, o.y + dy)) }
+          // Allow moving beyond the image bounds (build below/around the plan).
+          return { ...u, x: Math.max(-1, Math.min(2, o.x + dx)), y: Math.max(-1, Math.min(2, o.y + dy)) }
         }))
       }
     }
@@ -285,7 +286,7 @@ export default function MapCanvas({
           const rect = svg.getBoundingClientRect()
           const rawX = e.clientX - rect.left
           const rawY = e.clientY - rect.top
-          const clamped = clampToFrame(rawX, rawY, frame)
+          const clamped = clampToBox(rawX, rawY, svgSize.w, svgSize.h)
           // Snap both corners to the dot grid for clean, aligned blocks
           // (off when snap disabled or Alt held).
           const snapAxis = (v: number, origin: number) =>
@@ -384,12 +385,29 @@ export default function MapCanvas({
     e.preventDefault()
     const { x, y } = svgCoords(e)
     if (tool === 'draw' || tool === 'grid') {
-      const start = clampToFrame(x, y, frame)
+      const start = clampToBox(x, y, svgSize.w, svgSize.h)
       drawing.current = { startX: start.x, startY: start.y }
       setDraft({ x: start.x, y: start.y, w: 0, h: 0 })
       emitSelection([])
     } else if (tool === 'select') {
-      // Begin a rubber-band selection from empty canvas.
+      // If the press lands inside the current selection's bounding box, move the
+      // whole group (Figma-style) instead of starting a new marquee.
+      const sel = units.filter(u => selectionSet.has(u.id))
+      if (sel.length > 0 && !(e.shiftKey || e.metaKey)) {
+        const nx = (x - frame.x) / frame.w
+        const ny = (y - frame.y) / frame.h
+        const minX = Math.min(...sel.map(u => u.x))
+        const minY = Math.min(...sel.map(u => u.y))
+        const maxX = Math.max(...sel.map(u => u.x + u.width))
+        const maxY = Math.max(...sel.map(u => u.y + u.height))
+        if (nx >= minX && nx <= maxX && ny >= minY && ny <= maxY) {
+          const origins: Record<string, { x: number; y: number }> = {}
+          for (const u of sel) origins[u.id] = { x: u.x, y: u.y }
+          dragging.current = { ids: sel.map(u => u.id), origins, sx: x, sy: y }
+          return
+        }
+      }
+      // Otherwise begin a rubber-band selection from empty canvas.
       marquee.current = { startX: x, startY: y, additive: e.shiftKey || e.metaKey }
     }
   }

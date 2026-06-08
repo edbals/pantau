@@ -11,16 +11,19 @@ import {
 
 export const runtime = 'nodejs'
 
-// Verified-live vision models (2026-06), best-first. gemini-2.0-* are retired
-// (404). All support thinkingConfig.thinkingBudget.
+// Verified-live vision models (2026-06), best-first. gemini-2.5-flash is the
+// most consistent; gemini-3.5-flash is capable but intermittently hangs, so it
+// sits behind 2.5 as a fallback. gemini-2.0-* are retired (404).
 const MODELS = [
-  'gemini-3.5-flash',
   'gemini-2.5-flash',
+  'gemini-3.5-flash',
   'gemini-2.5-flash-lite',
   'gemini-flash-latest',
 ]
 
-const GEMINI_TIMEOUT_MS = 30_000
+// Successful calls return in ~12s; 22s gives headroom but fails over to the
+// next model quickly when one hangs (the old 30s felt like "it's broken").
+const GEMINI_TIMEOUT_MS = 22_000
 const MAX_OUTPUT_TOKENS = 8192
 
 const GRID_DETECTION_PROMPT = `You are analyzing an Indonesian residential housing site plan (denah kavling / blok plan).

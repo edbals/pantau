@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, use } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, use } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
@@ -10,7 +10,6 @@ import {
   validateUnitCodes,
   generateGridCodes,
   parseSkipList,
-  type ValidationIssue,
 } from '@/lib/digitize/numbering'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
@@ -61,8 +60,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
-  // Paint-tool brush: a subkon colour to apply on drag, or null to erase.
-  const [paintBrush, setPaintBrush] = useState<string | null>(null)
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -87,7 +84,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [isDirty, setIsDirty] = useState(false)
   const [draftUnits, setDraftUnits] = useState<CanvasUnit[] | null>(null)
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
-  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
+  const validationIssues = useMemo(
+    () => validateUnitCodes(units.map(u => u.unit_code), skipNumbers),
+    [units, skipNumbers]
+  )
   const initialUnitsRef = useRef<CanvasUnit[] | null>(null)
   const draftKey = `pantau_map_${id}`
 
@@ -141,18 +141,57 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       })
   }, [id])
 
-  // Entering the paint tool focuses the Subkon tab and defaults the brush.
-  useEffect(() => {
-    if (tool !== 'paint') return
-    setConfigTab('subcontractor')
-    setPaintBrush(b => b ?? subs[0]?.color ?? null)
-  }, [tool]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Paint tool: apply the active brush (subkon colour, or null to erase) to a unit.
-  function paintUnit(unitId: string) {
-    setIsDirty(true)
-    setUnits(prev => prev.map(u => u.id === unitId ? { ...u, subcontractor_color: paintBrush ?? undefined } : u))
+  // ── Undo / redo (coalesces rapid changes such as drags into one step) ──
+  const undoStack = useRef<CanvasUnit[][]>([])
+  const redoStack = useRef<CanvasUnit[][]>([])
+  const histBaseline = useRef<CanvasUnit[] | null>(null)
+  const skipHistory = useRef(false)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+  const syncHistFlags = () => {
+    setCanUndo(undoStack.current.length > 0)
+    setCanRedo(redoStack.current.length > 0)
   }
+
+  useEffect(() => {
+    if (skipHistory.current) { skipHistory.current = false; histBaseline.current = units; return }
+    if (histBaseline.current === null) { histBaseline.current = units; return }
+    if (histBaseline.current === units) return
+    const t = setTimeout(() => {
+      if (histBaseline.current && histBaseline.current !== units) {
+        undoStack.current.push(histBaseline.current)
+        if (undoStack.current.length > 50) undoStack.current.shift()
+        redoStack.current = []
+        histBaseline.current = units
+        syncHistFlags()
+      }
+    }, 450)
+    return () => clearTimeout(t)
+  }, [units])
+
+  const undo = useCallback(() => {
+    if (undoStack.current.length === 0) return
+    redoStack.current.push(units)
+    const prev = undoStack.current.pop()!
+    skipHistory.current = true
+    histBaseline.current = prev
+    setUnits(prev)
+    setSelectedIds([])
+    setIsDirty(true)
+    syncHistFlags()
+  }, [units])
+
+  const redo = useCallback(() => {
+    if (redoStack.current.length === 0) return
+    undoStack.current.push(units)
+    const next = redoStack.current.pop()!
+    skipHistory.current = true
+    histBaseline.current = next
+    setUnits(next)
+    setSelectedIds([])
+    setIsDirty(true)
+    syncHistFlags()
+  }, [units])
 
   // Applies a patch to every selected unit (works for 1 or many).
   function updateSelected(patch: Partial<CanvasUnit>) {
@@ -188,6 +227,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); return }
+      // Undo / redo (⌘Z, ⌘⇧Z or ⌘Y)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo(); else undo()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return }
       // Don't hijack single-letter shortcuts while typing in a field.
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
@@ -195,8 +241,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       if (e.key === 'h') setTool('hand')
       if (e.key === 'r') setTool('draw')
       if (e.key === 'g') setTool('grid')
-      if (e.key === 'p') setTool('paint')
-      if (e.key === 'd') setTool('delete')
       if (e.key === 'Escape') setSelectedIds([])
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
         setIsDirty(true)
@@ -206,7 +250,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, selectedIds])
+  }, [save, selectedIds, undo, redo])
 
   // Autosave to localStorage — fires 1.5 s after any user-initiated change
   useEffect(() => {
@@ -220,11 +264,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     }, 1500)
     return () => clearTimeout(timer)
   }, [units, isDirty, draftKey])
-
-  // Validation runs on every units change (skip-aware)
-  useEffect(() => {
-    setValidationIssues(validateUnitCodes(units.map(u => u.unit_code), skipNumbers))
-  }, [units, skipNumbers])
 
   // Warn before tab close / hard navigation when dirty
   useEffect(() => {
@@ -243,6 +282,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setDetectCount(null)
     setDetectError(null)
     setDetectDiag(null)
+    // Re-analyse is a clean slate: wipe existing units + selection first so the
+    // new result fully replaces the old one (and never half-merges on retry).
+    setSelectedIds([])
+    setUnits([])
 
     try {
       const imageForAnalysis = await prepareImageForAnalysis(file, rotation)
@@ -349,6 +392,15 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setIsDirty(true)
   }
 
+  function renameSub(index: number) {
+    const current = subs[index]
+    if (!current) return
+    const next = prompt('Ganti nama subkontraktor:', current.name)?.trim()
+    if (!next || next === current.name) return
+    setSubs(prev => prev.map((s, i) => i === index ? { ...s, name: next } : s))
+    setIsDirty(true)
+  }
+
   function deleteSub(index: number) {
     const removed = subs[index]
     if (!removed) return
@@ -452,13 +504,27 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         {/* Left toolbar */}
         <div className="w-16 flex flex-col items-center py-3 gap-1 flex-shrink-0"
           style={{ background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}>
+          {/* Undo / redo */}
+          <div className="flex gap-1">
+            <button onClick={undo} disabled={!canUndo} title="Urungkan (⌘Z)"
+              className="w-[26px] h-7 flex items-center justify-center rounded-lg text-[14px] transition-all"
+              style={{ background: 'transparent', color: canUndo ? 'var(--t2)' : 'var(--t3)', opacity: canUndo ? 1 : 0.35 }}>
+              ↶
+            </button>
+            <button onClick={redo} disabled={!canRedo} title="Ulangi (⌘⇧Z)"
+              className="w-[26px] h-7 flex items-center justify-center rounded-lg text-[14px] transition-all"
+              style={{ background: 'transparent', color: canRedo ? 'var(--t2)' : 'var(--t3)', opacity: canRedo ? 1 : 0.35 }}>
+              ↷
+            </button>
+          </div>
+
+          <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
+
           {([
-            { t: 'select' as Tool, icon: '↖', label: 'Pilih',  tip: 'Pilih & geser (V)' },
             { t: 'hand'   as Tool, icon: '✋', label: 'Geser',  tip: 'Geser peta (H) — atau seret tombol tengah mouse' },
+            { t: 'select' as Tool, icon: '⬚', label: 'Pilih',  tip: 'Pilih & seret untuk pilih banyak (V)' },
             { t: 'draw'   as Tool, icon: '✏️', label: 'Gambar', tip: 'Gambar unit (R)' },
             { t: 'grid'   as Tool, icon: '▦',  label: 'Grid',   tip: 'Grid blok otomatis (G)' },
-            { t: 'paint'  as Tool, icon: '🖌', label: 'Cat',    tip: 'Cat subkon: klik & seret (P)' },
-            { t: 'delete' as Tool, icon: '🗑',  label: 'Hapus',  tip: 'Hapus unit (D)' },
           ]).map(({ t, icon, label, tip }) => (
             <button key={t} onClick={() => setTool(t)} title={tip}
               className="w-14 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
@@ -542,10 +608,23 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           <MapCanvas
             units={units} onChange={(u) => { setIsDirty(true); setUnits(u) }}
             selectedIds={selectedIds} onSelectionChange={setSelectedIds}
-            tool={tool} snap={snapEnabled} onPaintUnit={paintUnit}
+            tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
+
+          {/* Shortcuts HUD — mini-Canva hints */}
+          {!gridRect && tool === 'select' && (
+            <div className="absolute bottom-3 left-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 rounded-lg text-[10px]"
+              style={{ background: 'rgba(10,22,40,0.82)', border: '1px solid rgba(95,208,240,0.2)', color: 'rgba(207,232,255,0.75)', backdropFilter: 'blur(8px)', maxWidth: 'calc(100% - 120px)' }}>
+              <span><b style={{ color: '#BFEFFF' }}>Seret</b> pilih banyak</span>
+              <span><b style={{ color: '#BFEFFF' }}>Shift</b>+klik tambah</span>
+              <span><b style={{ color: '#BFEFFF' }}>Delete</b> hapus</span>
+              <span><b style={{ color: '#BFEFFF' }}>⌘Z</b> urungkan</span>
+              <span><b style={{ color: '#BFEFFF' }}>⌥</b> bebas-snap</span>
+              <span><b style={{ color: '#BFEFFF' }}>Scroll</b> zoom</span>
+            </div>
+          )}
 
           {/* Block Grid config panel */}
           {gridRect && (
@@ -869,20 +948,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     style={{ background: 'var(--accent)' }}>+</button>
                 </div>
                 {subs.length > 0 && (
-                  <p className="text-[11px]" style={{ color: tool === 'paint' || selectedUnits.length > 0 ? 'var(--accent-2)' : 'var(--t3)' }}>
-                    {tool === 'paint'
-                      ? '🖌 Mode Cat: pilih subkon sbg kuas, lalu klik & seret unit di kanvas'
-                      : selectedUnits.length > 0
-                        ? `Klik subkon untuk menugaskan ke ${selectedUnits.length} unit terpilih`
-                        : 'Pilih unit dulu (atau pakai alat Cat), lalu klik subkon'}
+                  <p className="text-[11px]" style={{ color: selectedUnits.length > 0 ? 'var(--accent-2)' : 'var(--t3)' }}>
+                    {selectedUnits.length > 0
+                      ? `Klik subkon untuk menugaskan ke ${selectedUnits.length} unit terpilih`
+                      : 'Pilih unit dulu (seret untuk pilih banyak), lalu klik subkon'}
                   </p>
                 )}
                 {subs.map((s, i) => {
                   const assignedCount = units.filter(u => u.subcontractor_color === s.color).length
-                  const active = tool === 'paint' ? paintBrush === s.color : commonValue(u => u.subcontractor_color) === s.color
+                  const active = commonValue(u => u.subcontractor_color) === s.color
                   return (
                     <div key={i} className="flex items-center gap-1.5">
-                      <button onClick={() => tool === 'paint' ? setPaintBrush(s.color) : updateSelected({ subcontractor_color: s.color })}
+                      <button onClick={() => updateSelected({ subcontractor_color: s.color })}
                         className="flex-1 flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
                         style={{
                           background: active ? 'var(--bg-3)' : 'var(--bg-2)',
@@ -894,6 +971,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                         {assignedCount > 0 && (
                           <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--t3)' }}>{assignedCount}</span>
                         )}
+                      </button>
+                      <button onClick={() => renameSub(i)} title="Ganti nama"
+                        className="px-2 py-2 rounded-lg text-[12px] flex-shrink-0"
+                        style={{ background: 'var(--bg-2)', color: 'var(--t2)', border: '1px solid var(--border)' }}>
+                        ✎
                       </button>
                       <button
                         onClick={() => {
@@ -913,18 +995,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   <p className="text-[11px] text-center" style={{ color: 'var(--t3)' }}>
                     Tambahkan subkontraktor di atas
                   </p>
-                )}
-                {tool === 'paint' && subs.length > 0 && (
-                  <button onClick={() => setPaintBrush(null)}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
-                    style={{
-                      background: paintBrush === null ? 'var(--bg-3)' : 'var(--bg-2)',
-                      border: `1px dashed ${paintBrush === null ? 'var(--t2)' : 'var(--border)'}`,
-                      color: 'var(--t2)',
-                    }}>
-                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ border: '1px dashed var(--t3)' }} />
-                    <span className="flex-1 text-left">Hapus subkon (kuas kosong)</span>
-                  </button>
                 )}
               </div>
             )}
