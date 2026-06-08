@@ -192,6 +192,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (e.key === 'v') setTool('select')
+      if (e.key === 'h') setTool('hand')
       if (e.key === 'r') setTool('draw')
       if (e.key === 'g') setTool('grid')
       if (e.key === 'p') setTool('paint')
@@ -453,6 +454,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           style={{ background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}>
           {([
             { t: 'select' as Tool, icon: '↖', label: 'Pilih',  tip: 'Pilih & geser (V)' },
+            { t: 'hand'   as Tool, icon: '✋', label: 'Geser',  tip: 'Geser peta (H) — atau seret tombol tengah mouse' },
             { t: 'draw'   as Tool, icon: '✏️', label: 'Gambar', tip: 'Gambar unit (R)' },
             { t: 'grid'   as Tool, icon: '▦',  label: 'Grid',   tip: 'Grid blok otomatis (G)' },
             { t: 'paint'  as Tool, icon: '🖌', label: 'Cat',    tip: 'Cat subkon: klik & seret (P)' },

@@ -19,7 +19,7 @@ export interface CanvasUnit {
   label?: string
 }
 
-export type Tool = 'select' | 'draw' | 'delete' | 'grid' | 'paint'
+export type Tool = 'select' | 'draw' | 'delete' | 'grid' | 'paint' | 'hand'
 
 export interface GridRect { x: number; y: number; width: number; height: number }
 
@@ -364,10 +364,12 @@ export default function MapCanvas({
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
 
-  // Middle-mouse (or Space-held left) starts a pan from anywhere. Returns true
-  // if it consumed the event.
+  // Middle-mouse, or left-drag while the Hand tool is active, starts a pan from
+  // anywhere. Returns true if it consumed the event.
   function maybeStartPan(e: React.MouseEvent): boolean {
-    if (e.button !== 1) return false
+    const isMiddle = e.button === 1
+    const isHandDrag = tool === 'hand' && e.button === 0
+    if (!isMiddle && !isHandDrag) return false
     e.preventDefault()
     const { x, y } = svgCoords(e)
     panning.current = { sx: x, sy: y, ox: pan.x, oy: pan.y }
@@ -448,6 +450,7 @@ export default function MapCanvas({
         style={{
           display: 'block',
           cursor: isPanning ? 'grabbing'
+            : tool === 'hand' ? 'grab'
             : (tool === 'draw' || tool === 'grid') ? 'crosshair'
             : tool === 'delete' ? 'not-allowed'
             : tool === 'paint' ? 'crosshair'
@@ -492,7 +495,7 @@ export default function MapCanvas({
           return (
             <g key={u.id}
               transform={rotation ? `rotate(${rotation} ${cx} ${cy})` : undefined}
-              style={{ cursor: readOnly ? 'pointer' : tool === 'delete' ? 'not-allowed' : tool === 'paint' ? 'crosshair' : tool === 'select' ? 'move' : 'default' }}
+              style={{ cursor: readOnly ? 'pointer' : isPanning ? 'grabbing' : tool === 'hand' ? 'grab' : tool === 'delete' ? 'not-allowed' : tool === 'paint' ? 'crosshair' : tool === 'select' ? 'move' : 'default' }}
               onMouseDown={e => handleUnitMouseDown(e, u.id)}
               onMouseEnter={() => { if (tool === 'paint' && painting.current) onPaintUnit?.(u.id) }}>
 
@@ -571,25 +574,45 @@ export default function MapCanvas({
                 </>
               )}
 
-              {/* Unit label — always horizontal, shrunk to fit the cell width
-                  (monospace ≈ 0.6em per char). Hidden if it would be too tiny. */}
+              {/* Unit label — always horizontal. Falls back to two lines
+                  (e.g. "3F" / "18") in narrow lots so it stays readable instead
+                  of shrinking to nothing. Hidden only if even two lines are tiny. */}
               {(() => {
                 const text = u.label ?? u.unit_code
                 if (!text) return null
-                const byWidth = (pw * 0.86) / (text.length * 0.6)
-                const byHeight = ph * 0.62
-                const fontSize = Math.min(13, byWidth, byHeight)
+                const dash = text.indexOf('-')
+                const parts = dash > 0 ? [text.slice(0, dash), text.slice(dash + 1)] : null
+
+                // Largest font that fits `chars` across and `lines` down.
+                const fit = (chars: number, lines: number) =>
+                  Math.min(13, (pw * 0.86) / (chars * 0.6), (ph * (lines === 1 ? 0.62 : 0.82)) / lines)
+
+                const single = fit(text.length, 1)
+                const twoChars = parts ? Math.max(parts[0].length, parts[1].length) : text.length
+                const two = parts ? fit(twoChars, 2) : 0
+
+                // Prefer two lines when it's clearly more legible (narrow lots).
+                const useTwo = !!parts && two >= 6 && (two > single * 1.12 || single < 6)
+                const fontSize = useTwo ? two : single
                 if (fontSize < 6) return null
+
+                const common = {
+                  textAnchor: 'middle' as const,
+                  fill: isSelected ? '#EAF7FF' : 'rgba(207,232,255,0.9)',
+                  fontWeight: 500,
+                  fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+                  style: { pointerEvents: 'none' as const },
+                }
+                if (useTwo && parts) {
+                  return (
+                    <text x={cx} y={cy} dominantBaseline="central" fontSize={fontSize} {...common}>
+                      <tspan x={cx} dy="-0.55em">{parts[0]}</tspan>
+                      <tspan x={cx} dy="1.1em">{parts[1]}</tspan>
+                    </text>
+                  )
+                }
                 return (
-                  <text x={cx} y={cy}
-                    textAnchor="middle" dominantBaseline="central"
-                    fontSize={fontSize}
-                    fill={isSelected ? '#EAF7FF' : 'rgba(207,232,255,0.9)'}
-                    fontWeight="500"
-                    fontFamily="ui-monospace, 'SF Mono', Menlo, monospace"
-                    style={{ pointerEvents: 'none' }}>
-                    {text}
-                  </text>
+                  <text x={cx} y={cy} dominantBaseline="central" fontSize={fontSize} {...common}>{text}</text>
                 )
               })()}
             </g>
