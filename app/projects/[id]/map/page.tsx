@@ -5,13 +5,15 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
 import GridSizePicker from '@/components/map/GridSizePicker'
+import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud'
 import {
   validateUnitCodes,
   generateGridCodes,
   parseSkipList,
   type ValidationIssue,
 } from '@/lib/digitize/numbering'
-type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'spk' | 'supervisor'
+// SPK templates are managed separately at /spk, not inside the denah editor.
+type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
 
 interface MapDraft {
   units: CanvasUnit[]
@@ -58,6 +60,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [units, setUnits] = useState<CanvasUnit[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
+  const [snapEnabled, setSnapEnabled] = useState(true)
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -112,6 +115,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         if (Array.isArray(j.data.canvas_data?.skipNumbers)) {
           setSkipNumbers(j.data.canvas_data.skipNumbers)
         }
+        if (Array.isArray(j.data.canvas_data?.subs)) {
+          setSubs(j.data.canvas_data.subs)
+        }
 
         try {
           const raw = localStorage.getItem(`pantau_map_${id}`)
@@ -145,7 +151,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const res = await fetch(`/api/v1/projects/${id}/map/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ canvas_data: { units, skipNumbers } }),
+      body: JSON.stringify({ canvas_data: { units, skipNumbers, subs } }),
     })
     if (res.ok) {
       setIsDirty(false)
@@ -154,7 +160,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [id, units, skipNumbers])
+  }, [id, units, skipNumbers, subs])
 
   // Ctrl+S to save
   useEffect(() => {
@@ -316,6 +322,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const color = SUB_COLORS[subs.length % SUB_COLORS.length]
     setSubs(prev => [...prev, { name: subName.trim(), color }])
     setSubName('')
+    setIsDirty(true)
   }
 
   function deleteSub(index: number) {
@@ -441,6 +448,20 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
           <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
 
+          {/* Snap-to-grid toggle */}
+          <button onClick={() => setSnapEnabled(s => !s)} title="Snap ke grid (tahan Alt untuk bypass sementara)"
+            className="w-14 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
+            style={{
+              background: snapEnabled ? 'var(--accent-sub)' : 'transparent',
+              border: snapEnabled ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
+              color: snapEnabled ? 'var(--accent-2)' : 'var(--t3)',
+            }}>
+            <span className="text-[16px] leading-none">⊹</span>
+            <span className="text-[9px] font-medium leading-none">Snap</span>
+          </button>
+
+          <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
+
           <div className="text-center px-1">
             <div className="text-[13px] font-bold" style={{ color: 'var(--t1)' }}>{countSellableUnits(units)}</div>
             <div className="text-[8px]" style={{ color: 'var(--t3)' }}>unit</div>
@@ -455,9 +476,23 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         {/* Canvas */}
         <div className="flex-1 overflow-hidden relative">
 
+          {/* Step-by-step progress HUD */}
+          {!gridRect && (() => {
+            const sellable = countSellableUnits(units)
+            const assignedSubkon = units.filter(u => isSellableUnit(u) && u.subcontractor_color).length
+            const steps: StudioStep[] = [
+              { key: 'denah', label: 'Denah', done: !!bgImageUrl || units.length > 0 },
+              { key: 'unit', label: 'Unit', done: units.length > 0, detail: sellable > 0 ? String(sellable) : undefined, onClick: () => setTool('select') },
+              { key: 'subkon', label: 'Subkon', done: sellable > 0 && assignedSubkon === sellable, detail: sellable > 0 ? `${assignedSubkon}/${sellable}` : undefined, onClick: () => setConfigTab('subcontractor') },
+              { key: 'prioritas', label: 'Prioritas', optional: true, done: units.some(u => u.urgency && u.urgency !== 'normal'), onClick: () => setConfigTab('urgency') },
+              { key: 'golive', label: 'Go Live', done: false, onClick: goLive },
+            ]
+            return <StudioStepsHud steps={steps} />
+          })()}
+
           {/* Draft recovery banner */}
           {draftUnits && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium"
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium"
               style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: 'var(--amber)', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
               <span>💾 Ditemukan draft yang belum disimpan ({draftSavedAt ? new Date(draftSavedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '?'})</span>
               <button onClick={() => { setIsDirty(true); setUnits(draftUnits); setDraftUnits(null) }}
@@ -475,7 +510,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           <MapCanvas
             units={units} onChange={(u) => { setIsDirty(true); setUnits(u) }}
             selectedIds={selectedIds} onSelectionChange={setSelectedIds}
-            tool={tool}
+            tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
@@ -628,7 +663,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
           {/* Detection result / error banner */}
           {(detectCount !== null || detectError) && !digitizing && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium flex items-start gap-2 max-w-lg"
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg text-sm font-medium flex items-start gap-2 max-w-lg"
               style={{
                 background: detectError ? 'rgba(239,68,68,0.15)' : detectCount! > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)',
                 border: `1px solid ${detectError ? 'rgba(239,68,68,0.4)' : detectCount! > 0 ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)'}`,
@@ -658,7 +693,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               { key: 'type', label: 'Tipe' },
               { key: 'urgency', label: 'Urgensi' },
               { key: 'subcontractor', label: 'Subkon' },
-              { key: 'spk', label: 'SPK' },
               { key: 'supervisor', label: 'Pengawas' },
             ] as { key: ConfigTab; label: string }[]).map(tab => (
               <button key={tab.key} onClick={() => setConfigTab(tab.key)}
@@ -802,6 +836,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     className="px-3 py-1.5 rounded text-[12px] font-semibold text-white"
                     style={{ background: 'var(--accent)' }}>+</button>
                 </div>
+                {subs.length > 0 && (
+                  <p className="text-[11px]" style={{ color: selectedUnits.length > 0 ? 'var(--accent-2)' : 'var(--t3)' }}>
+                    {selectedUnits.length > 0
+                      ? `Klik subkon untuk menugaskan ke ${selectedUnits.length} unit terpilih`
+                      : 'Pilih unit di kanvas dulu, lalu klik subkon untuk menugaskan'}
+                  </p>
+                )}
                 {subs.map((s, i) => {
                   const assignedCount = units.filter(u => u.subcontractor_color === s.color).length
                   const active = commonValue(u => u.subcontractor_color) === s.color
@@ -839,20 +880,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     Tambahkan subkontraktor di atas
                   </p>
                 )}
-              </div>
-            )}
-
-            {/* Tab: SPK */}
-            {configTab === 'spk' && (
-              <div>
-                <p className="text-[11px] mb-3" style={{ color: 'var(--t3)' }}>
-                  Template SPK tersedia setelah dibuat di menu SPK.
-                </p>
-                <Link href="/spk"
-                  className="block w-full text-center py-2 rounded-lg text-[12px] font-medium"
-                  style={{ background: 'var(--accent-sub)', color: 'var(--accent-2)', border: '1px solid rgba(124,58,237,0.3)' }}>
-                  Kelola Template SPK →
-                </Link>
               </div>
             )}
 

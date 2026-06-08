@@ -33,6 +33,7 @@ interface Props {
   selectedIds?: string[]
   onSelectionChange?: (ids: string[]) => void
   tool: Tool
+  snap?: boolean  // snap drag/resize/draw to the dot grid (default true)
   bgImageUrl?: string
   readOnly?: boolean
   showProgress?: boolean
@@ -94,7 +95,7 @@ function clampToFrame(x: number, y: number, frame: { x: number; y: number; w: nu
 
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
-  tool, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
+  tool, snap = true, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -168,8 +169,8 @@ export default function MapCanvas({
         return
       }
 
-      // Snap a screen-pixel delta to the grid (Alt bypasses).
-      const snapPx = (v: number) => e.altKey ? v : Math.round(v / GRID_PX) * GRID_PX
+      // Snap a screen-pixel delta to the grid (off when snap disabled or Alt held).
+      const snapPx = (v: number) => (!snap || e.altKey) ? v : Math.round(v / GRID_PX) * GRID_PX
 
       if (resizing.current) {
         const { id, handle, ox, oy, ow, oh, sx, sy } = resizing.current
@@ -226,9 +227,10 @@ export default function MapCanvas({
           const rawX = e.clientX - rect.left
           const rawY = e.clientY - rect.top
           const clamped = clampToFrame(rawX, rawY, frame)
-          // Snap both corners to the dot grid for clean, aligned blocks (Alt bypasses).
+          // Snap both corners to the dot grid for clean, aligned blocks
+          // (off when snap disabled or Alt held).
           const snapAxis = (v: number, origin: number) =>
-            e.altKey ? v : origin + Math.round((v - origin) / GRID_PX) * GRID_PX
+            (!snap || e.altKey) ? v : origin + Math.round((v - origin) / GRID_PX) * GRID_PX
           const x = snapAxis(clamped.x, frame.x)
           const y = snapAxis(clamped.y, frame.y)
           const startX = snapAxis(drawing.current.startX, frame.x)
@@ -293,7 +295,7 @@ export default function MapCanvas({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, onGridRect]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, snap, onGridRect]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function svgCoords(e: React.MouseEvent) {
     const svg = svgRef.current!
