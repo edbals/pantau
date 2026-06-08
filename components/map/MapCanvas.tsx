@@ -26,8 +26,12 @@ export interface GridRect { x: number; y: number; width: number; height: number 
 interface Props {
   units: CanvasUnit[]
   onChange: (units: CanvasUnit[]) => void
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  // Single-select pair (read-only viewer). The editor uses the multi-select
+  // pair below, which takes precedence when provided.
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
+  selectedIds?: string[]
+  onSelectionChange?: (ids: string[]) => void
   tool: Tool
   bgImageUrl?: string
   readOnly?: boolean
@@ -85,18 +89,32 @@ function clampToFrame(x: number, y: number, frame: { x: number; y: number; w: nu
 }
 
 export default function MapCanvas({
-  units, onChange, selectedId, onSelect, tool, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
+  units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
+  tool, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [svgSize, setSvgSize] = useState({ w: 800, h: 600 })
   const [imageSize, setImageSize] = useState<{ src: string; w: number; h: number } | null>(null)
   const drawing = useRef<{ startX: number; startY: number } | null>(null)
-  const dragging = useRef<{ id: string; ox: number; oy: number; sx: number; sy: number } | null>(null)
+  const dragging = useRef<{
+    ids: string[]; origins: Record<string, { x: number; y: number }>; sx: number; sy: number
+  } | null>(null)
   const resizing = useRef<{
     id: string; handle: ResizeHandle
     ox: number; oy: number; ow: number; oh: number; sx: number; sy: number
   } | null>(null)
+  // Marquee (rubber-band) rectangle in screen px while drag-selecting.
+  const marquee = useRef<{ startX: number; startY: number; additive: boolean } | null>(null)
+  const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+
+  // Effective selection: multi-select prop wins; otherwise the single id.
+  const selection = selectedIds ?? (selectedId ? [selectedId] : [])
+  const selectionSet = useMemo(() => new Set(selection), [selection.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
+  const emitSelection = (ids: string[]) => {
+    if (onSelectionChange) onSelectionChange(ids)
+    else onSelect?.(ids[ids.length - 1] ?? null)
+  }
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
   const frame = useMemo(
@@ -130,12 +148,21 @@ export default function MapCanvas({
   // the cursor briefly leaves the SVG mid-stroke
   useEffect(() => {
     function onMove(e: MouseEvent) {
-      if (!drawing.current && !dragging.current && !resizing.current) return
+      if (!drawing.current && !dragging.current && !resizing.current && !marquee.current) return
       const svg = svgRef.current
       if (!svg) return
       const rect = svg.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
+
+      if (marquee.current) {
+        const { startX, startY } = marquee.current
+        setMarqueeRect({
+          x: Math.min(startX, x), y: Math.min(startY, y),
+          w: Math.abs(x - startX), h: Math.abs(y - startY),
+        })
+        return
+      }
 
       if (resizing.current) {
         const { id, handle, ox, oy, ow, oh, sx, sy } = resizing.current
@@ -171,14 +198,15 @@ export default function MapCanvas({
         })
       }
       if (dragging.current) {
-        const { id, ox, oy, sx, sy } = dragging.current
+        const { ids, origins, sx, sy } = dragging.current
         const dx = (x - sx) / frame.w
         const dy = (y - sy) / frame.h
-        onChange(units.map(u =>
-          u.id === id
-            ? { ...u, x: Math.max(0, Math.min(1 - u.width, ox + dx)), y: Math.max(0, Math.min(1 - u.height, oy + dy)) }
-            : u
-        ))
+        const idSet = new Set(ids)
+        onChange(units.map(u => {
+          if (!idSet.has(u.id)) return u
+          const o = origins[u.id]
+          return { ...u, x: Math.max(0, Math.min(1 - u.width, o.x + dx)), y: Math.max(0, Math.min(1 - u.height, o.y + dy)) }
+        }))
       }
     }
 
@@ -206,13 +234,41 @@ export default function MapCanvas({
                 unit_type: 'house', x: nx, y: ny, width: nw, height: nh, rotation: 0,
               }
               onChange([...units, newUnit])
-              onSelect(newUnit.id)
+              emitSelection([newUnit.id])
             }
           }
         }
         drawing.current = null
         setDraft(null)
       }
+
+      if (marquee.current) {
+        const { startX, startY, additive } = marquee.current
+        const svg = svgRef.current
+        if (svg) {
+          const r = svg.getBoundingClientRect()
+          const ex = e.clientX - r.left
+          const ey = e.clientY - r.top
+          const moved = Math.abs(ex - startX) > 3 || Math.abs(ey - startY) > 3
+          if (moved) {
+            // Normalised marquee rect.
+            const mx = (Math.min(startX, ex) - frame.x) / frame.w
+            const my = (Math.min(startY, ey) - frame.y) / frame.h
+            const mw = Math.abs(ex - startX) / frame.w
+            const mh = Math.abs(ey - startY) / frame.h
+            const hits = units
+              .filter(u => u.x < mx + mw && u.x + u.width > mx && u.y < my + mh && u.y + u.height > my)
+              .map(u => u.id)
+            emitSelection(additive ? [...new Set([...selection, ...hits])] : hits)
+          } else if (!additive) {
+            // A plain click on empty canvas clears the selection.
+            emitSelection([])
+          }
+        }
+        marquee.current = null
+        setMarqueeRect(null)
+      }
+
       dragging.current = null
       resizing.current = null
     }
@@ -223,7 +279,7 @@ export default function MapCanvas({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [units, onChange, onSelect, svgSize, frame, tool, onGridRect])
+  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, onGridRect]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function svgCoords(e: React.MouseEvent) {
     const svg = svgRef.current!
@@ -239,7 +295,10 @@ export default function MapCanvas({
       const start = clampToFrame(x, y, frame)
       drawing.current = { startX: start.x, startY: start.y }
       setDraft({ x: start.x, y: start.y, w: 0, h: 0 })
-      onSelect(null)
+      emitSelection([])
+    } else if (tool === 'select') {
+      // Begin a rubber-band selection from empty canvas.
+      marquee.current = { startX: x, startY: y, additive: e.shiftKey || e.metaKey }
     }
   }
 
@@ -250,14 +309,27 @@ export default function MapCanvas({
 
     if (tool === 'delete') {
       onChange(units.filter(u => u.id !== id))
-      onSelect(null)
+      emitSelection(selection.filter(s => s !== id))
       return
     }
     if (tool === 'select') {
-      onSelect(id)
-      const u = units.find(uu => uu.id === id)!
+      const additive = e.shiftKey || e.metaKey
+      let nextSelection: string[]
+      if (additive) {
+        // Toggle this unit in/out of the selection.
+        nextSelection = selectionSet.has(id) ? selection.filter(s => s !== id) : [...selection, id]
+        emitSelection(nextSelection)
+        return // don't start a drag while shift-picking
+      }
+      // Plain click: keep the group if this unit is already part of it (so you
+      // can drag the whole group), otherwise select just this one.
+      nextSelection = selectionSet.has(id) ? selection : [id]
+      emitSelection(nextSelection)
+
       const { x, y } = svgCoords(e)
-      dragging.current = { id, ox: u.x, oy: u.y, sx: x, sy: y }
+      const origins: Record<string, { x: number; y: number }> = {}
+      for (const u of units) if (nextSelection.includes(u.id)) origins[u.id] = { x: u.x, y: u.y }
+      dragging.current = { ids: nextSelection, origins, sx: x, sy: y }
     }
   }
 
@@ -307,7 +379,7 @@ export default function MapCanvas({
           const cx = px + pw / 2
           const cy = py + ph / 2
           const style = TYPE_STYLE[u.unit_type] ?? TYPE_STYLE.house
-          const isSelected = u.id === selectedId
+          const isSelected = selectionSet.has(u.id)
           // Fill: progress color in PM view, otherwise plain type fill (subcon shown as bottom line, not fill)
           const fillColor = showProgress && u.progress_pct !== undefined
             ? progressColor(u.progress_pct)
@@ -372,9 +444,9 @@ export default function MapCanvas({
                   style={{ pointerEvents: 'none' }} />
               )}
 
-              {/* Resize handles — 4 corners + 4 edge midpoints. Interactive in
-                  the select tool; drag to resize width/height. */}
-              {isSelected && !readOnly && tool === 'select' && (
+              {/* Resize handles — 4 corners + 4 edge midpoints. Only when a
+                  single unit is selected; drag to resize width/height. */}
+              {isSelected && !readOnly && tool === 'select' && selection.length === 1 && (
                 <>
                   {([
                     { k: 'nw', hx: px,          hy: py,          cursor: 'nwse-resize' },
@@ -415,6 +487,15 @@ export default function MapCanvas({
             fill="rgba(124,58,237,0.12)"
             stroke="var(--accent)" strokeWidth={1.5}
             strokeDasharray="6,3" rx={2}
+            style={{ pointerEvents: 'none' }}
+          />
+        )}
+
+        {/* Rubber-band selection rectangle */}
+        {marqueeRect && (marqueeRect.w > 2 || marqueeRect.h > 2) && (
+          <rect x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.w} height={marqueeRect.h}
+            fill="rgba(96,165,250,0.10)"
+            stroke="#60A5FA" strokeWidth={1} strokeDasharray="4,3"
             style={{ pointerEvents: 'none' }}
           />
         )}

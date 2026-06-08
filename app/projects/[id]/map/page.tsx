@@ -55,7 +55,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
   const [project, setProject] = useState<{ name: string; project_code: string } | null>(null)
   const [units, setUnits] = useState<CanvasUnit[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
@@ -85,7 +85,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const initialUnitsRef = useRef<CanvasUnit[] | null>(null)
   const draftKey = `pantau_map_${id}`
 
-  const selected = units.find(u => u.id === selectedId) ?? null
+  const selectedSet = new Set(selectedIds)
+  const selectedUnits = units.filter(u => selectedSet.has(u.id))
+  // The detail panel only makes sense for exactly one unit.
+  const selected = selectedUnits.length === 1 ? selectedUnits[0] : null
+
+  // Returns the value shared by every selected unit for a field, or null if
+  // they differ — used to highlight the active option in batch mode.
+  function commonValue<T>(getter: (u: CanvasUnit) => T): T | null {
+    if (selectedUnits.length === 0) return null
+    const first = getter(selectedUnits[0])
+    return selectedUnits.every(u => getter(u) === first) ? first : null
+  }
 
   // Load project, then check for unsaved localStorage draft
   useEffect(() => {
@@ -114,10 +125,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       })
   }, [id])
 
+  // Applies a patch to every selected unit (works for 1 or many).
   function updateSelected(patch: Partial<CanvasUnit>) {
-    if (!selectedId) return
+    if (selectedIds.length === 0) return
     setIsDirty(true)
-    setUnits(prev => prev.map(u => u.id === selectedId ? { ...u, ...patch } : u))
+    setUnits(prev => prev.map(u => selectedSet.has(u.id) ? { ...u, ...patch } : u))
+  }
+
+  function deleteSelected() {
+    if (selectedIds.length === 0) return
+    setIsDirty(true)
+    setUnits(prev => prev.filter(u => !selectedSet.has(u.id)))
+    setSelectedIds([])
   }
 
   const save = useCallback(async () => {
@@ -139,20 +158,24 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   // Ctrl+S to save
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save() }
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); return }
+      // Don't hijack single-letter shortcuts while typing in a field.
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (e.key === 'v') setTool('select')
       if (e.key === 'r') setTool('draw')
       if (e.key === 'g') setTool('grid')
       if (e.key === 'd') setTool('delete')
-      if (e.key === 'Escape') setSelectedId(null)
-      if (e.key === 'Delete' && selectedId) {
-        setUnits(prev => prev.filter(u => u.id !== selectedId))
-        setSelectedId(null)
+      if (e.key === 'Escape') setSelectedIds([])
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
+        setIsDirty(true)
+        setUnits(prev => prev.filter(u => !selectedIds.includes(u.id)))
+        setSelectedIds([])
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, selectedId])
+  }, [save, selectedIds])
 
   // Autosave to localStorage — fires 1.5 s after any user-initiated change
   useEffect(() => {
@@ -450,7 +473,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
           <MapCanvas
             units={units} onChange={(u) => { setIsDirty(true); setUnits(u) }}
-            selectedId={selectedId} onSelect={setSelectedId}
+            selectedIds={selectedIds} onSelectionChange={setSelectedIds}
             tool={tool}
             bgImageUrl={bgImageUrl ?? undefined}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
@@ -684,7 +707,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     </button>
                   </div>
                 </div>
-                <button onClick={() => { setUnits(p => p.filter(u => u.id !== selectedId)); setSelectedId(null) }}
+                <button onClick={deleteSelected}
                   className="w-full py-1.5 rounded text-[11px] font-medium"
                   style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>
                   Hapus Unit
@@ -692,44 +715,68 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               </div>
             )}
 
-            {!selected && (
+            {/* Batch selection summary (more than one unit) */}
+            {selectedUnits.length > 1 && (
+              <div className="mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+                <p className="text-[10px] font-semibold tracking-widest uppercase mb-2" style={{ color: 'var(--t3)' }}>
+                  {selectedUnits.length} Unit Dipilih
+                </p>
+                <p className="text-[11px] mb-2" style={{ color: 'var(--t3)' }}>
+                  Atur tipe, urgensi, subkon, atau pengawas di bawah untuk semua sekaligus.
+                </p>
+                <button onClick={deleteSelected}
+                  className="w-full py-1.5 rounded text-[11px] font-medium"
+                  style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  Hapus {selectedUnits.length} Unit
+                </button>
+              </div>
+            )}
+
+            {selectedUnits.length === 0 && (
               <p className="text-[12px] text-center py-4" style={{ color: 'var(--t3)' }}>
-                Pilih unit di kanvas untuk mengkonfigurasi
+                Pilih unit di kanvas untuk mengkonfigurasi.<br />
+                <span className="text-[11px]">Seret di area kosong untuk pilih banyak, Shift+klik untuk menambah.</span>
               </p>
             )}
 
             {/* Tab: Tipe */}
-            {configTab === 'type' && selected && (
+            {configTab === 'type' && selectedUnits.length > 0 && (
               <div className="grid grid-cols-2 gap-2">
-                {UNIT_TYPES.map(ut => (
-                  <button key={ut.value} onClick={() => updateSelected({ unit_type: ut.value })}
-                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] text-left"
-                    style={{
-                      background: selected.unit_type === ut.value ? 'var(--accent-sub)' : 'var(--bg-2)',
-                      border: selected.unit_type === ut.value ? '1px solid rgba(124,58,237,0.4)' : '1px solid var(--border)',
-                      color: selected.unit_type === ut.value ? 'var(--accent-2)' : 'var(--t2)',
-                    }}>
-                    <span>{ut.icon}</span><span>{ut.label}</span>
-                  </button>
-                ))}
+                {UNIT_TYPES.map(ut => {
+                  const active = commonValue(u => u.unit_type) === ut.value
+                  return (
+                    <button key={ut.value} onClick={() => updateSelected({ unit_type: ut.value })}
+                      className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] text-left"
+                      style={{
+                        background: active ? 'var(--accent-sub)' : 'var(--bg-2)',
+                        border: active ? '1px solid rgba(124,58,237,0.4)' : '1px solid var(--border)',
+                        color: active ? 'var(--accent-2)' : 'var(--t2)',
+                      }}>
+                      <span>{ut.icon}</span><span>{ut.label}</span>
+                    </button>
+                  )
+                })}
               </div>
             )}
 
             {/* Tab: Urgensi */}
-            {configTab === 'urgency' && selected && (
+            {configTab === 'urgency' && selectedUnits.length > 0 && (
               <div className="space-y-2">
-                {URGENCY_OPTIONS.map(opt => (
-                  <button key={opt.value} onClick={() => updateSelected({ urgency: opt.value as 'normal' | 'high' | 'critical' })}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium"
-                    style={{
-                      background: selected.urgency === opt.value ? 'var(--bg-3)' : 'var(--bg-2)',
-                      border: `1px solid ${selected.urgency === opt.value ? opt.color : 'var(--border)'}`,
-                      color: selected.urgency === opt.value ? opt.color : 'var(--t2)',
-                    }}>
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: opt.color }} />
-                    {opt.label}
-                  </button>
-                ))}
+                {URGENCY_OPTIONS.map(opt => {
+                  const active = commonValue(u => u.urgency ?? 'normal') === opt.value
+                  return (
+                    <button key={opt.value} onClick={() => updateSelected({ urgency: opt.value as 'normal' | 'high' | 'critical' })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium"
+                      style={{
+                        background: active ? 'var(--bg-3)' : 'var(--bg-2)',
+                        border: `1px solid ${active ? opt.color : 'var(--border)'}`,
+                        color: active ? opt.color : 'var(--t2)',
+                      }}>
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: opt.color }} />
+                      {opt.label}
+                    </button>
+                  )
+                })}
               </div>
             )}
 
@@ -748,13 +795,14 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                 </div>
                 {subs.map((s, i) => {
                   const assignedCount = units.filter(u => u.subcontractor_color === s.color).length
+                  const active = commonValue(u => u.subcontractor_color) === s.color
                   return (
                     <div key={i} className="flex items-center gap-1.5">
-                      <button onClick={() => selected && updateSelected({ subcontractor_color: s.color })}
+                      <button onClick={() => updateSelected({ subcontractor_color: s.color })}
                         className="flex-1 flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
                         style={{
-                          background: selected?.subcontractor_color === s.color ? 'var(--bg-3)' : 'var(--bg-2)',
-                          border: `1px solid ${selected?.subcontractor_color === s.color ? s.color : 'var(--border)'}`,
+                          background: active ? 'var(--bg-3)' : 'var(--bg-2)',
+                          border: `1px solid ${active ? s.color : 'var(--border)'}`,
                           color: 'var(--t1)',
                         }}>
                         <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: s.color }} />
