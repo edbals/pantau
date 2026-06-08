@@ -173,13 +173,14 @@ describe('expandGridToUnits — math', () => {
 
   test('lays cells out without overlap, normalized', () => {
     const units = expandGridToUnits(grid)
-    // cellW = 0.6/3 = 0.2, cellH = 0.4/2 = 0.2
-    expect(units[0].coordinates.x).toBeCloseTo(0)
-    expect(units[0].coordinates.y).toBeCloseTo(0)
-    expect(units[0].coordinates.width).toBeCloseTo(0.2)
-    expect(units[0].coordinates.height).toBeCloseTo(0.2)
-    expect(units[1].coordinates.x).toBeCloseTo(0.2)
-    expect(units[3].coordinates.y).toBeCloseTo(0.2) // first cell of second row
+    // cellW = 0.6/3 = 0.2, cellH = 0.4/2 = 0.2, with an 8% gutter inset each side.
+    const inset = 0.2 * 0.08
+    expect(units[0].coordinates.x).toBeCloseTo(inset)
+    expect(units[0].coordinates.y).toBeCloseTo(inset)
+    expect(units[0].coordinates.width).toBeCloseTo(0.2 - 2 * inset)
+    expect(units[0].coordinates.height).toBeCloseTo(0.2 - 2 * inset)
+    expect(units[1].coordinates.x).toBeCloseTo(0.2 + inset) // second column, gutter-inset
+    expect(units[3].coordinates.y).toBeCloseTo(0.2 + inset) // first cell of second row
   })
 })
 

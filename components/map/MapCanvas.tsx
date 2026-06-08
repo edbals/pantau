@@ -115,6 +115,11 @@ export default function MapCanvas({
   // Marquee (rubber-band) rectangle in screen px while drag-selecting.
   const marquee = useRef<{ startX: number; startY: number; additive: boolean } | null>(null)
   const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  // Zoom / pan view transform.
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const panning = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const [isPanning, setIsPanning] = useState(false)
 
   // Effective selection: multi-select prop wins; otherwise the single id.
   const selection = selectedIds ?? (selectedId ? [selectedId] : [])
@@ -125,12 +130,57 @@ export default function MapCanvas({
   }
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
-  const frame = useMemo(
+  // Contain-fit rectangle before any zoom/pan.
+  const baseFrame = useMemo(
     () => imageSize && imageSize.src === bgImageUrl
       ? containFrame(svgSize.w, svgSize.h, imageSize.w, imageSize.h)
       : { x: 0, y: 0, w: svgSize.w, h: svgSize.h },
     [imageSize, bgImageUrl, svgSize]
   )
+
+  // View frame = base scaled by zoom and shifted by pan. ALL rendering and
+  // pointer math go through this, so zoom/pan apply uniformly.
+  const frame = useMemo(
+    () => ({ x: baseFrame.x * zoom + pan.x, y: baseFrame.y * zoom + pan.y, w: baseFrame.w * zoom, h: baseFrame.h * zoom }),
+    [baseFrame, zoom, pan]
+  )
+
+  // Always-current view, so the (passive-safe) wheel listener avoids stale state.
+  const viewRef = useRef({ zoom, pan })
+  viewRef.current = { zoom, pan }
+
+  const ZOOM_MIN = 0.3
+  const ZOOM_MAX = 6
+  const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z))
+
+  // Zoom toward a screen point (sx,sy), keeping that point stationary.
+  function zoomToPoint(nextZoom: number, sx: number, sy: number) {
+    const { zoom: z0, pan: p0 } = viewRef.current
+    const z = clampZoom(nextZoom)
+    const px = (sx - p0.x) / z0
+    const py = (sy - p0.y) / z0
+    setZoom(z)
+    setPan({ x: sx - px * z, y: sy - py * z })
+  }
+  const zoomBy = (factor: number) => zoomToPoint(viewRef.current.zoom * factor, svgSize.w / 2, svgSize.h / 2)
+  const fitView = () => { setZoom(1); setPan({ x: 0, y: 0 }) }
+
+  // Wheel zoom (attached non-passive so we can prevent page scroll).
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    function onWheel(e: WheelEvent) {
+      e.preventDefault()
+      const rect = svg!.getBoundingClientRect()
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
+      zoomToPoint(viewRef.current.zoom * factor, e.clientX - rect.left, e.clientY - rect.top)
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset the view when a new background (re-digitize) loads.
+  useEffect(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [bgImageUrl])
 
   // Measure the container, not the SVG (avoids chicken-and-egg sizing)
   useEffect(() => {
@@ -156,12 +206,18 @@ export default function MapCanvas({
   // the cursor briefly leaves the SVG mid-stroke
   useEffect(() => {
     function onMove(e: MouseEvent) {
-      if (!drawing.current && !dragging.current && !resizing.current && !marquee.current) return
+      if (!drawing.current && !dragging.current && !resizing.current && !marquee.current && !panning.current) return
       const svg = svgRef.current
       if (!svg) return
       const rect = svg.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
+
+      if (panning.current) {
+        const { sx, sy, ox, oy } = panning.current
+        setPan({ x: ox + (x - sx), y: oy + (y - sy) })
+        return
+      }
 
       if (marquee.current) {
         const { startX, startY } = marquee.current
@@ -291,6 +347,7 @@ export default function MapCanvas({
       dragging.current = null
       resizing.current = null
       painting.current = false
+      if (panning.current) { panning.current = null; setIsPanning(false) }
     }
 
     window.addEventListener('mousemove', onMove)
@@ -307,8 +364,21 @@ export default function MapCanvas({
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
 
+  // Middle-mouse (or Space-held left) starts a pan from anywhere. Returns true
+  // if it consumed the event.
+  function maybeStartPan(e: React.MouseEvent): boolean {
+    if (e.button !== 1) return false
+    e.preventDefault()
+    const { x, y } = svgCoords(e)
+    panning.current = { sx: x, sy: y, ox: pan.x, oy: pan.y }
+    setIsPanning(true)
+    return true
+  }
+
   function handleSvgMouseDown(e: React.MouseEvent) {
-    if (readOnly || e.button !== 0) return
+    if (readOnly) return
+    if (maybeStartPan(e)) return
+    if (e.button !== 0) return
     e.preventDefault()
     const { x, y } = svgCoords(e)
     if (tool === 'draw' || tool === 'grid') {
@@ -324,6 +394,7 @@ export default function MapCanvas({
 
   function handleUnitMouseDown(e: React.MouseEvent, id: string) {
     if (readOnly) return
+    if (maybeStartPan(e)) return
     e.stopPropagation()
     if (e.button !== 0) return
 
@@ -376,10 +447,16 @@ export default function MapCanvas({
         height={svgSize.h}
         style={{
           display: 'block',
-          cursor: (tool === 'draw' || tool === 'grid') ? 'crosshair' : tool === 'delete' ? 'not-allowed' : 'default',
+          cursor: isPanning ? 'grabbing'
+            : (tool === 'draw' || tool === 'grid') ? 'crosshair'
+            : tool === 'delete' ? 'not-allowed'
+            : tool === 'paint' ? 'crosshair'
+            : 'default',
           background: BLUEPRINT_BG,
           backgroundImage: `radial-gradient(rgba(130,175,235,0.16) 1px, transparent 1.4px)`,
-          backgroundSize: `${GRID_PX}px ${GRID_PX}px`,
+          // Dot grid pans + scales with the content so it feels attached.
+          backgroundSize: `${GRID_PX * zoom}px ${GRID_PX * zoom}px`,
+          backgroundPosition: `${pan.x}px ${pan.y}px`,
           userSelect: 'none',
         }}
         onMouseDown={handleSvgMouseDown}
@@ -494,19 +571,29 @@ export default function MapCanvas({
                 </>
               )}
 
-              {/* Unit label — monospace, blueprint ink */}
-              {pw > 20 && ph > 14 && (
-                <text x={px + pw / 2} y={py + ph / 2 + 4}
-                  textAnchor="middle"
-                  fontSize={Math.max(9, Math.min(13, pw / 5))}
-                  fill={isSelected ? '#EAF7FF' : 'rgba(207,232,255,0.88)'}
-                  fontWeight="500"
-                  fontFamily="ui-monospace, 'SF Mono', Menlo, monospace"
-                  letterSpacing="0.3"
-                  style={{ pointerEvents: 'none' }}>
-                  {u.label ?? u.unit_code}
-                </text>
-              )}
+              {/* Unit label — monospace blueprint ink, auto-fit + rotated
+                  vertically in tall/narrow lots so it never overflows. */}
+              {(() => {
+                const text = u.label ?? u.unit_code
+                if (!text) return null
+                const horizontal = pw >= ph
+                const along = horizontal ? pw : ph   // length available for the text
+                const across = horizontal ? ph : pw  // thickness perpendicular to it
+                if (across < 11 || along < 22) return null
+                const fontSize = Math.max(7, Math.min(13, Math.min(across * 0.5, (along * 1.5) / text.length)))
+                return (
+                  <text x={cx} y={cy}
+                    textAnchor="middle" dominantBaseline="central"
+                    fontSize={fontSize}
+                    fill={isSelected ? '#EAF7FF' : 'rgba(207,232,255,0.9)'}
+                    fontWeight="500"
+                    fontFamily="ui-monospace, 'SF Mono', Menlo, monospace"
+                    transform={horizontal ? undefined : `rotate(-90 ${cx} ${cy})`}
+                    style={{ pointerEvents: 'none' }}>
+                    {text}
+                  </text>
+                )
+              })()}
             </g>
           )
         })}
@@ -530,6 +617,22 @@ export default function MapCanvas({
           />
         )}
       </svg>
+
+      {/* Zoom controls */}
+      {!readOnly && (
+        <div className="absolute bottom-3 right-3 flex items-center gap-1 px-1.5 py-1 rounded-lg"
+          style={{ background: 'rgba(10,22,40,0.85)', border: '1px solid rgba(95,208,240,0.25)', backdropFilter: 'blur(8px)' }}>
+          <button onClick={() => zoomBy(1 / 1.25)} title="Perkecil"
+            className="w-6 h-6 rounded flex items-center justify-center text-[14px]"
+            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>−</button>
+          <button onClick={fitView} title="Pas ke layar"
+            className="px-2 h-6 rounded text-[11px] font-mono"
+            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>{Math.round(zoom * 100)}%</button>
+          <button onClick={() => zoomBy(1.25)} title="Perbesar"
+            className="w-6 h-6 rounded flex items-center justify-center text-[14px]"
+            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>+</button>
+        </div>
+      )}
     </div>
   )
 }

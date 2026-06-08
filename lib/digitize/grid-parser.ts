@@ -220,10 +220,16 @@ function normaliseBox(raw: Record<string, unknown>): BoundingBox {
 
 // ── Expansion: grid sections → individual lot units ──────────────────────────
 
+// Fraction of each cell left as a gutter so generated lots read as separated
+// tiles instead of a cramped, touching grid.
+const CELL_GAP_RATIO = 0.08
+
 export function expandGridToUnits(grid: DetectedGrid): DetectedUnit[] {
   const { prefix, rows, cols, start_number, bounding_box, confidence, temp_id } = grid
   const cellW = bounding_box.width / cols
   const cellH = bounding_box.height / rows
+  const insetX = cellW * CELL_GAP_RATIO
+  const insetY = cellH * CELL_GAP_RATIO
   const units: DetectedUnit[] = []
   let n = start_number
 
@@ -238,10 +244,10 @@ export function expandGridToUnits(grid: DetectedGrid): DetectedUnit[] {
         label_detected: null,
         suggested_code: code,
         coordinates: {
-          x: clamp01(bounding_box.x + c * cellW),
-          y: clamp01(bounding_box.y + r * cellH),
-          width: clamp01(cellW),
-          height: clamp01(cellH),
+          x: clamp01(bounding_box.x + c * cellW + insetX),
+          y: clamp01(bounding_box.y + r * cellH + insetY),
+          width: clamp01(cellW - 2 * insetX),
+          height: clamp01(cellH - 2 * insetY),
         },
         rotation_degrees: 0,
         confidence,
