@@ -221,29 +221,14 @@ function normaliseBox(raw: Record<string, unknown>): BoundingBox {
 // ── Expansion: grid sections → individual lot units ──────────────────────────
 
 // Fraction of each cell left as a gutter so generated lots read as separated
-// tiles instead of a cramped, touching grid.
+// tiles instead of a cramped, touching grid. Cells otherwise fill their detected
+// bounding box exactly — widening to "square" makes adjacent blocks overlap.
 const CELL_GAP_RATIO = 0.08
-// Minimum width:height for a generated lot. AI bounding boxes are often very
-// short, producing thin slivers; we widen lots toward square (growing the block
-// horizontally and re-centering it) so the result reads as a clean grid.
-const MIN_CELL_ASPECT = 0.9
 
 export function expandGridToUnits(grid: DetectedGrid): DetectedUnit[] {
   const { prefix, rows, cols, start_number, bounding_box, confidence, temp_id } = grid
   const cellH = bounding_box.height / rows
-  let cellW = bounding_box.width / cols
-  let blockX = bounding_box.x
-
-  // Widen thin cells toward square, but cap block growth to 1.5x its original
-  // width so adjacent blocks (e.g. lots 1-20 and 21-41 either side of a road)
-  // don't overlap. Keep it centred and within the canvas.
-  if (cellW < cellH * MIN_CELL_ASPECT) {
-    const maxBlockW = Math.min(1, bounding_box.width * 1.5)
-    const blockW = Math.min(maxBlockW, cellH * MIN_CELL_ASPECT * cols)
-    cellW = blockW / cols
-    const centre = bounding_box.x + bounding_box.width / 2
-    blockX = Math.max(0, Math.min(1 - blockW, centre - blockW / 2))
-  }
+  const cellW = bounding_box.width / cols
 
   const insetX = cellW * CELL_GAP_RATIO
   const insetY = cellH * CELL_GAP_RATIO
@@ -261,7 +246,7 @@ export function expandGridToUnits(grid: DetectedGrid): DetectedUnit[] {
         label_detected: null,
         suggested_code: code,
         coordinates: {
-          x: clamp01(blockX + c * cellW + insetX),
+          x: clamp01(bounding_box.x + c * cellW + insetX),
           y: clamp01(bounding_box.y + r * cellH + insetY),
           width: clamp01(cellW - 2 * insetX),
           height: clamp01(cellH - 2 * insetY),
