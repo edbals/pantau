@@ -19,7 +19,7 @@ export interface CanvasUnit {
   label?: string
 }
 
-export type Tool = 'select' | 'draw' | 'delete' | 'grid'
+export type Tool = 'select' | 'draw' | 'delete' | 'grid' | 'paint'
 
 export interface GridRect { x: number; y: number; width: number; height: number }
 
@@ -34,6 +34,7 @@ interface Props {
   onSelectionChange?: (ids: string[]) => void
   tool: Tool
   snap?: boolean  // snap drag/resize/draw to the dot grid (default true)
+  onPaintUnit?: (id: string) => void  // paint tool: apply the active brush to a unit
   bgImageUrl?: string
   readOnly?: boolean
   showProgress?: boolean
@@ -95,7 +96,7 @@ function clampToFrame(x: number, y: number, frame: { x: number; y: number; w: nu
 
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
-  tool, snap = true, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
+  tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -109,6 +110,8 @@ export default function MapCanvas({
     id: string; handle: ResizeHandle
     ox: number; oy: number; ow: number; oh: number; sx: number; sy: number
   } | null>(null)
+  // True while the paint brush is held down (drag to paint many units).
+  const painting = useRef(false)
   // Marquee (rubber-band) rectangle in screen px while drag-selecting.
   const marquee = useRef<{ startX: number; startY: number; additive: boolean } | null>(null)
   const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -287,6 +290,7 @@ export default function MapCanvas({
 
       dragging.current = null
       resizing.current = null
+      painting.current = false
     }
 
     window.addEventListener('mousemove', onMove)
@@ -326,6 +330,11 @@ export default function MapCanvas({
     if (tool === 'delete') {
       onChange(units.filter(u => u.id !== id))
       emitSelection(selection.filter(s => s !== id))
+      return
+    }
+    if (tool === 'paint') {
+      painting.current = true
+      onPaintUnit?.(id)
       return
     }
     if (tool === 'select') {
@@ -406,8 +415,9 @@ export default function MapCanvas({
           return (
             <g key={u.id}
               transform={rotation ? `rotate(${rotation} ${cx} ${cy})` : undefined}
-              style={{ cursor: readOnly ? 'pointer' : tool === 'delete' ? 'not-allowed' : tool === 'select' ? 'move' : 'default' }}
-              onMouseDown={e => handleUnitMouseDown(e, u.id)}>
+              style={{ cursor: readOnly ? 'pointer' : tool === 'delete' ? 'not-allowed' : tool === 'paint' ? 'crosshair' : tool === 'select' ? 'move' : 'default' }}
+              onMouseDown={e => handleUnitMouseDown(e, u.id)}
+              onMouseEnter={() => { if (tool === 'paint' && painting.current) onPaintUnit?.(u.id) }}>
 
               {/* Unit body */}
               <rect x={px} y={py} width={pw} height={ph}

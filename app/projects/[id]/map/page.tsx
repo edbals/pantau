@@ -61,6 +61,8 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
+  // Paint-tool brush: a subkon colour to apply on drag, or null to erase.
+  const [paintBrush, setPaintBrush] = useState<string | null>(null)
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -123,14 +125,34 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           const raw = localStorage.getItem(`pantau_map_${id}`)
           if (raw) {
             const draft = JSON.parse(raw) as MapDraft
-            if (draft.units?.length > 0) {
+            // Only offer recovery when the draft actually differs from what was
+            // just loaded from the server — otherwise it's redundant noise.
+            const differs = JSON.stringify(draft.units ?? []) !== JSON.stringify(serverUnits)
+            const dismissed = sessionStorage.getItem(`pantau_map_dismiss_${id}`) === draft.savedAt
+            if (draft.units?.length > 0 && differs && !dismissed) {
               setDraftUnits(draft.units)
               setDraftSavedAt(draft.savedAt)
+            } else if (!differs) {
+              // Draft matches server — clear the stale copy.
+              localStorage.removeItem(`pantau_map_${id}`)
             }
           }
         } catch {}
       })
   }, [id])
+
+  // Entering the paint tool focuses the Subkon tab and defaults the brush.
+  useEffect(() => {
+    if (tool !== 'paint') return
+    setConfigTab('subcontractor')
+    setPaintBrush(b => b ?? subs[0]?.color ?? null)
+  }, [tool]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Paint tool: apply the active brush (subkon colour, or null to erase) to a unit.
+  function paintUnit(unitId: string) {
+    setIsDirty(true)
+    setUnits(prev => prev.map(u => u.id === unitId ? { ...u, subcontractor_color: paintBrush ?? undefined } : u))
+  }
 
   // Applies a patch to every selected unit (works for 1 or many).
   function updateSelected(patch: Partial<CanvasUnit>) {
@@ -172,6 +194,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       if (e.key === 'v') setTool('select')
       if (e.key === 'r') setTool('draw')
       if (e.key === 'g') setTool('grid')
+      if (e.key === 'p') setTool('paint')
       if (e.key === 'd') setTool('delete')
       if (e.key === 'Escape') setSelectedIds([])
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
@@ -432,6 +455,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             { t: 'select' as Tool, icon: '↖', label: 'Pilih',  tip: 'Pilih & geser (V)' },
             { t: 'draw'   as Tool, icon: '✏️', label: 'Gambar', tip: 'Gambar unit (R)' },
             { t: 'grid'   as Tool, icon: '▦',  label: 'Grid',   tip: 'Grid blok otomatis (G)' },
+            { t: 'paint'  as Tool, icon: '🖌', label: 'Cat',    tip: 'Cat subkon: klik & seret (P)' },
             { t: 'delete' as Tool, icon: '🗑',  label: 'Hapus',  tip: 'Hapus unit (D)' },
           ]).map(({ t, icon, label, tip }) => (
             <button key={t} onClick={() => setTool(t)} title={tip}
@@ -500,7 +524,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                 style={{ background: 'rgba(245,158,11,0.3)', color: 'var(--amber)' }}>
                 Pulihkan
               </button>
-              <button onClick={() => { setDraftUnits(null); try { localStorage.removeItem(draftKey) } catch {} }}
+              <button onClick={() => {
+                  try {
+                    if (draftSavedAt) sessionStorage.setItem(`pantau_map_dismiss_${id}`, draftSavedAt)
+                    localStorage.removeItem(draftKey)
+                  } catch {}
+                  setDraftUnits(null)
+                }}
                 className="opacity-60 hover:opacity-100 text-xs">
                 Abaikan ×
               </button>
@@ -510,7 +540,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           <MapCanvas
             units={units} onChange={(u) => { setIsDirty(true); setUnits(u) }}
             selectedIds={selectedIds} onSelectionChange={setSelectedIds}
-            tool={tool} snap={snapEnabled}
+            tool={tool} snap={snapEnabled} onPaintUnit={paintUnit}
             bgImageUrl={bgImageUrl ?? undefined}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
@@ -837,18 +867,20 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     style={{ background: 'var(--accent)' }}>+</button>
                 </div>
                 {subs.length > 0 && (
-                  <p className="text-[11px]" style={{ color: selectedUnits.length > 0 ? 'var(--accent-2)' : 'var(--t3)' }}>
-                    {selectedUnits.length > 0
-                      ? `Klik subkon untuk menugaskan ke ${selectedUnits.length} unit terpilih`
-                      : 'Pilih unit di kanvas dulu, lalu klik subkon untuk menugaskan'}
+                  <p className="text-[11px]" style={{ color: tool === 'paint' || selectedUnits.length > 0 ? 'var(--accent-2)' : 'var(--t3)' }}>
+                    {tool === 'paint'
+                      ? '🖌 Mode Cat: pilih subkon sbg kuas, lalu klik & seret unit di kanvas'
+                      : selectedUnits.length > 0
+                        ? `Klik subkon untuk menugaskan ke ${selectedUnits.length} unit terpilih`
+                        : 'Pilih unit dulu (atau pakai alat Cat), lalu klik subkon'}
                   </p>
                 )}
                 {subs.map((s, i) => {
                   const assignedCount = units.filter(u => u.subcontractor_color === s.color).length
-                  const active = commonValue(u => u.subcontractor_color) === s.color
+                  const active = tool === 'paint' ? paintBrush === s.color : commonValue(u => u.subcontractor_color) === s.color
                   return (
                     <div key={i} className="flex items-center gap-1.5">
-                      <button onClick={() => updateSelected({ subcontractor_color: s.color })}
+                      <button onClick={() => tool === 'paint' ? setPaintBrush(s.color) : updateSelected({ subcontractor_color: s.color })}
                         className="flex-1 flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
                         style={{
                           background: active ? 'var(--bg-3)' : 'var(--bg-2)',
@@ -879,6 +911,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   <p className="text-[11px] text-center" style={{ color: 'var(--t3)' }}>
                     Tambahkan subkontraktor di atas
                   </p>
+                )}
+                {tool === 'paint' && subs.length > 0 && (
+                  <button onClick={() => setPaintBrush(null)}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
+                    style={{
+                      background: paintBrush === null ? 'var(--bg-3)' : 'var(--bg-2)',
+                      border: `1px dashed ${paintBrush === null ? 'var(--t2)' : 'var(--border)'}`,
+                      color: 'var(--t2)',
+                    }}>
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ border: '1px dashed var(--t3)' }} />
+                    <span className="flex-1 text-left">Hapus subkon (kuas kosong)</span>
+                  </button>
                 )}
               </div>
             )}
