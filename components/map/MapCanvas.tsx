@@ -61,6 +61,11 @@ function progressColor(pct: number) {
 let uidCounter = 1
 function uid() { return `u_${Date.now()}_${uidCounter++}` }
 
+// Smallest a unit may be shrunk to (normalised 0-1), so it never collapses.
+const MIN_UNIT_SIZE = 0.008
+
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+
 function containFrame(containerW: number, containerH: number, imageW: number, imageH: number) {
   if (containerW <= 0 || containerH <= 0 || imageW <= 0 || imageH <= 0) {
     return { x: 0, y: 0, w: containerW, h: containerH }
@@ -88,6 +93,10 @@ export default function MapCanvas({
   const [imageSize, setImageSize] = useState<{ src: string; w: number; h: number } | null>(null)
   const drawing = useRef<{ startX: number; startY: number } | null>(null)
   const dragging = useRef<{ id: string; ox: number; oy: number; sx: number; sy: number } | null>(null)
+  const resizing = useRef<{
+    id: string; handle: ResizeHandle
+    ox: number; oy: number; ow: number; oh: number; sx: number; sy: number
+  } | null>(null)
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
   const frame = useMemo(
@@ -121,12 +130,37 @@ export default function MapCanvas({
   // the cursor briefly leaves the SVG mid-stroke
   useEffect(() => {
     function onMove(e: MouseEvent) {
-      if (!drawing.current && !dragging.current) return
+      if (!drawing.current && !dragging.current && !resizing.current) return
       const svg = svgRef.current
       if (!svg) return
       const rect = svg.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
+
+      if (resizing.current) {
+        const { id, handle, ox, oy, ow, oh, sx, sy } = resizing.current
+        const dx = (x - sx) / frame.w
+        const dy = (y - sy) / frame.h
+        let nx = ox, ny = oy, nw = ow, nh = oh
+
+        if (handle.includes('e')) nw = ow + dx
+        if (handle.includes('s')) nh = oh + dy
+        if (handle.includes('w')) { nx = ox + dx; nw = ow - dx }
+        if (handle.includes('n')) { ny = oy + dy; nh = oh - dy }
+
+        // Enforce a minimum size without flipping the box past its anchor edge.
+        if (nw < MIN_UNIT_SIZE) { if (handle.includes('w')) nx = ox + ow - MIN_UNIT_SIZE; nw = MIN_UNIT_SIZE }
+        if (nh < MIN_UNIT_SIZE) { if (handle.includes('n')) ny = oy + oh - MIN_UNIT_SIZE; nh = MIN_UNIT_SIZE }
+
+        // Keep the unit inside the canvas.
+        nx = Math.max(0, Math.min(1 - nw, nx))
+        ny = Math.max(0, Math.min(1 - nh, ny))
+        nw = Math.min(nw, 1 - nx)
+        nh = Math.min(nh, 1 - ny)
+
+        onChange(units.map(u => u.id === id ? { ...u, x: nx, y: ny, width: nw, height: nh } : u))
+        return
+      }
 
       if (drawing.current) {
         const point = clampToFrame(x, y, frame)
@@ -180,6 +214,7 @@ export default function MapCanvas({
         setDraft(null)
       }
       dragging.current = null
+      resizing.current = null
     }
 
     window.addEventListener('mousemove', onMove)
@@ -224,6 +259,15 @@ export default function MapCanvas({
       const { x, y } = svgCoords(e)
       dragging.current = { id, ox: u.x, oy: u.y, sx: x, sy: y }
     }
+  }
+
+  function handleResizeStart(e: React.MouseEvent, id: string, handle: ResizeHandle) {
+    if (readOnly || e.button !== 0) return
+    e.stopPropagation()
+    const u = units.find(uu => uu.id === id)
+    if (!u) return
+    const { x, y } = svgCoords(e)
+    resizing.current = { id, handle, ox: u.x, oy: u.y, ow: u.width, oh: u.height, sx: x, sy: y }
   }
 
   return (
@@ -328,13 +372,24 @@ export default function MapCanvas({
                   style={{ pointerEvents: 'none' }} />
               )}
 
-              {/* Selection corner handles */}
-              {isSelected && !readOnly && (
+              {/* Resize handles — 4 corners + 4 edge midpoints. Interactive in
+                  the select tool; drag to resize width/height. */}
+              {isSelected && !readOnly && tool === 'select' && (
                 <>
-                  {[{ cx: px, cy: py }, { cx: px + pw, cy: py }, { cx: px, cy: py + ph }, { cx: px + pw, cy: py + ph }].map((h, i) => (
-                    <circle key={i} cx={h.cx} cy={h.cy} r={5}
-                      fill="var(--accent)" stroke="#fff" strokeWidth={1.5}
-                      style={{ pointerEvents: 'none' }} />
+                  {([
+                    { k: 'nw', hx: px,          hy: py,          cursor: 'nwse-resize' },
+                    { k: 'n',  hx: px + pw / 2, hy: py,          cursor: 'ns-resize' },
+                    { k: 'ne', hx: px + pw,     hy: py,          cursor: 'nesw-resize' },
+                    { k: 'e',  hx: px + pw,     hy: py + ph / 2, cursor: 'ew-resize' },
+                    { k: 'se', hx: px + pw,     hy: py + ph,     cursor: 'nwse-resize' },
+                    { k: 's',  hx: px + pw / 2, hy: py + ph,     cursor: 'ns-resize' },
+                    { k: 'sw', hx: px,          hy: py + ph,     cursor: 'nesw-resize' },
+                    { k: 'w',  hx: px,          hy: py + ph / 2, cursor: 'ew-resize' },
+                  ] as const).map(h => (
+                    <rect key={h.k} x={h.hx - 5} y={h.hy - 5} width={10} height={10}
+                      fill="var(--accent)" stroke="#fff" strokeWidth={1.5} rx={2}
+                      style={{ cursor: h.cursor }}
+                      onMouseDown={e => handleResizeStart(e, u.id, h.k)} />
                   ))}
                 </>
               )}

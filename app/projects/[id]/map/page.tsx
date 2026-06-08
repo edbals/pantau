@@ -4,77 +4,20 @@ import { useState, useEffect, useCallback, useRef, use } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
+import {
+  validateUnitCodes,
+  generateGridCodes,
+  parseSkipList,
+  type ValidationIssue,
+} from '@/lib/digitize/numbering'
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'spk' | 'supervisor'
 
 interface MapDraft {
   units: CanvasUnit[]
+  skipNumbers?: number[]
   savedAt: string
 }
 
-type ValidationIssue =
-  | { type: 'duplicate'; codes: string[] }
-  | { type: 'gap'; prefix: string; gaps: string[] }
-  | { type: 'missing_suffix'; missing: string }
-
-function validateUnitCodes(units: CanvasUnit[]): ValidationIssue[] {
-  const issues: ValidationIssue[] = []
-  const codes = units.map(u => u.unit_code).filter(Boolean)
-
-  const seen = new Set<string>()
-  const dupes: string[] = []
-  for (const code of codes) {
-    if (seen.has(code)) dupes.push(code)
-    else seen.add(code)
-  }
-  if (dupes.length > 0) issues.push({ type: 'duplicate', codes: dupes })
-
-  const byPrefix = new Map<string, number[]>()
-  for (const code of codes) {
-    const match = code.match(/^(.+)-(\d+)[A-Z]?$/)
-    if (match) {
-      const prefix = match[1]
-      const num = parseInt(match[2])
-      const existing = byPrefix.get(prefix) ?? []
-      byPrefix.set(prefix, [...existing, num])
-    }
-  }
-  for (const [prefix, nums] of byPrefix) {
-    const unique = [...new Set(nums)].sort((a, b) => a - b)
-    if (unique.length < 2) continue
-    for (let i = unique[0] + 1; i < unique[unique.length - 1]; i++) {
-      if (!unique.includes(i)) {
-        const existing = issues.find(iss => iss.type === 'gap' && iss.prefix === prefix)
-        if (existing && existing.type === 'gap') {
-          existing.gaps = [...existing.gaps, `${prefix}-${String(i).padStart(2, '0')}`]
-        } else {
-          issues.push({ type: 'gap', prefix, gaps: [`${prefix}-${String(i).padStart(2, '0')}`] })
-        }
-        if (issues.filter(iss => iss.type === 'gap').length >= 5) break
-      }
-    }
-  }
-
-  const byBase = new Map<string, string[]>()
-  for (const code of codes) {
-    const match = code.match(/^(.+-\d+)([A-Z])$/)
-    if (match) {
-      const base = match[1]
-      const suffix = match[2]
-      const existing = byBase.get(base) ?? []
-      byBase.set(base, [...existing, suffix])
-    }
-  }
-  for (const [base, suffixes] of byBase) {
-    if (suffixes.includes('A') && !suffixes.includes('B')) {
-      issues.push({ type: 'missing_suffix', missing: `${base}B` })
-    }
-    if (suffixes.includes('B') && !suffixes.includes('A')) {
-      issues.push({ type: 'missing_suffix', missing: `${base}A` })
-    }
-  }
-
-  return issues
-}
 
 const UNIT_TYPES: { value: UnitType; label: string; icon: string }[] = [
   { value: 'house', label: 'Rumah', icon: '🏠' },
@@ -129,6 +72,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [gridCols, setGridCols] = useState('10')
   const [gridPrefix, setGridPrefix] = useState('A')
   const [gridStart, setGridStart] = useState('1')
+  const [gridSkip, setGridSkip] = useState('')
+  // Project-wide intentionally-skipped numbers (e.g. 4, 13, 14) so validation
+  // doesn't flag them as missing.
+  const [skipNumbers, setSkipNumbers] = useState<number[]>([])
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
   const [isDirty, setIsDirty] = useState(false)
@@ -150,6 +97,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         const serverUnits: CanvasUnit[] = j.data.canvas_data?.units ?? []
         setUnits(serverUnits)
         initialUnitsRef.current = serverUnits
+        if (Array.isArray(j.data.canvas_data?.skipNumbers)) {
+          setSkipNumbers(j.data.canvas_data.skipNumbers)
+        }
 
         try {
           const raw = localStorage.getItem(`pantau_map_${id}`)
@@ -175,7 +125,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const res = await fetch(`/api/v1/projects/${id}/map/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ canvas_data: { units } }),
+      body: JSON.stringify({ canvas_data: { units, skipNumbers } }),
     })
     if (res.ok) {
       setIsDirty(false)
@@ -184,7 +134,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [id, units])
+  }, [id, units, skipNumbers])
 
   // Ctrl+S to save
   useEffect(() => {
@@ -217,10 +167,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     return () => clearTimeout(timer)
   }, [units, isDirty, draftKey])
 
-  // Validation runs on every units change
+  // Validation runs on every units change (skip-aware)
   useEffect(() => {
-    setValidationIssues(validateUnitCodes(units))
-  }, [units])
+    setValidationIssues(validateUnitCodes(units.map(u => u.unit_code), skipNumbers))
+  }, [units, skipNumbers])
 
   // Warn before tab close / hard navigation when dirty
   useEffect(() => {
@@ -302,17 +252,21 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const cols = Math.max(1, parseInt(gridCols) || 1)
     const start = parseInt(gridStart) || 1
     const prefix = gridPrefix.trim() || 'U'
+    const skip = parseSkipList(gridSkip)
 
     const unitW = gridRect.width / cols
     const unitH = gridRect.height / rows
+    // Generate codes up front so skipped numbers (e.g. 4, 13, 14) are honoured.
+    const codes = generateGridCodes({ prefix, start, count: rows * cols, skip })
+    const stamp = Date.now()
     const newUnits: CanvasUnit[] = []
-    let n = start
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c
         newUnits.push({
-          id: `grid_${Date.now()}_${r}_${c}`,
-          unit_code: `${prefix}-${String(n).padStart(2, '0')}`,
+          id: `grid_${stamp}_${r}_${c}`,
+          unit_code: codes[idx],
           unit_type: 'house',
           x: gridRect.x + c * unitW,
           y: gridRect.y + r * unitH,
@@ -320,10 +274,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           height: unitH,
           rotation: 0,
         })
-        n++
       }
     }
 
+    // Remember the skips so validation won't flag them as gaps.
+    if (skip.length > 0) {
+      setSkipNumbers(prev => [...new Set([...prev, ...skip])].sort((a, b) => a - b))
+    }
     setIsDirty(true)
     setUnits(prev => [...prev, ...newUnits])
     setGridRect(null)
@@ -556,11 +513,30 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                       className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
                       style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
                   </div>
+                  <div>
+                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Lewati nomor (cth. 4, 13, 14)</label>
+                    <input type="text" value={gridSkip}
+                      onChange={e => setGridSkip(e.target.value)}
+                      placeholder="kosongkan jika tidak ada"
+                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  </div>
                 </div>
 
-                <p className="text-[11px] mb-4 text-center" style={{ color: 'var(--accent-2)' }}>
-                  → {(parseInt(gridRows)||1) * (parseInt(gridCols)||1)} unit: {gridPrefix}-{String(parseInt(gridStart)||1).padStart(2,'0')} s/d {gridPrefix}-{String((parseInt(gridRows)||1)*(parseInt(gridCols)||1)+(parseInt(gridStart)||1)-1).padStart(2,'0')}
-                </p>
+                {(() => {
+                  const total = (parseInt(gridRows) || 1) * (parseInt(gridCols) || 1)
+                  const preview = generateGridCodes({
+                    prefix: gridPrefix.trim() || 'U',
+                    start: parseInt(gridStart) || 1,
+                    count: total,
+                    skip: parseSkipList(gridSkip),
+                  })
+                  return (
+                    <p className="text-[11px] mb-4 text-center" style={{ color: 'var(--accent-2)' }}>
+                      → {total} unit: {preview[0]} s/d {preview[preview.length - 1]}
+                    </p>
+                  )
+                })()}
 
                 <div className="flex gap-2">
                   <button onClick={() => setGridRect(null)}
