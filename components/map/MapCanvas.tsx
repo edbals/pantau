@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 
 export type UnitType =
   | 'house' | 'apartment' | 'shophouse' | 'commercial' | 'villa'
@@ -11,6 +11,7 @@ export interface CanvasUnit {
   unit_code: string
   unit_type: UnitType
   x: number; y: number; width: number; height: number  // 0-1 normalised
+  rotation?: number  // degrees, clockwise, around unit center
   subcontractor_color?: string
   urgency?: 'normal' | 'high' | 'critical'
   progress_pct?: number
@@ -60,15 +61,41 @@ function progressColor(pct: number) {
 let uidCounter = 1
 function uid() { return `u_${Date.now()}_${uidCounter++}` }
 
+function containFrame(containerW: number, containerH: number, imageW: number, imageH: number) {
+  if (containerW <= 0 || containerH <= 0 || imageW <= 0 || imageH <= 0) {
+    return { x: 0, y: 0, w: containerW, h: containerH }
+  }
+
+  const scale = Math.min(containerW / imageW, containerH / imageH)
+  const w = imageW * scale
+  const h = imageH * scale
+  return { x: (containerW - w) / 2, y: (containerH - h) / 2, w, h }
+}
+
+function clampToFrame(x: number, y: number, frame: { x: number; y: number; w: number; h: number }) {
+  return {
+    x: Math.max(frame.x, Math.min(frame.x + frame.w, x)),
+    y: Math.max(frame.y, Math.min(frame.y + frame.h, y)),
+  }
+}
+
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, tool, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [svgSize, setSvgSize] = useState({ w: 800, h: 600 })
+  const [imageSize, setImageSize] = useState<{ src: string; w: number; h: number } | null>(null)
   const drawing = useRef<{ startX: number; startY: number } | null>(null)
   const dragging = useRef<{ id: string; ox: number; oy: number; sx: number; sy: number } | null>(null)
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+
+  const frame = useMemo(
+    () => imageSize && imageSize.src === bgImageUrl
+      ? containFrame(svgSize.w, svgSize.h, imageSize.w, imageSize.h)
+      : { x: 0, y: 0, w: svgSize.w, h: svgSize.h },
+    [imageSize, bgImageUrl, svgSize]
+  )
 
   // Measure the container, not the SVG (avoids chicken-and-egg sizing)
   useEffect(() => {
@@ -82,6 +109,14 @@ export default function MapCanvas({
     return () => ro.disconnect()
   }, [])
 
+  useEffect(() => {
+    if (!bgImageUrl) return
+
+    const image = new Image()
+    image.onload = () => setImageSize({ src: bgImageUrl, w: image.naturalWidth, h: image.naturalHeight })
+    image.src = bgImageUrl
+  }, [bgImageUrl])
+
   // Attach mouse events to the WINDOW so drawing isn't cancelled when
   // the cursor briefly leaves the SVG mid-stroke
   useEffect(() => {
@@ -94,16 +129,17 @@ export default function MapCanvas({
       const y = e.clientY - rect.top
 
       if (drawing.current) {
+        const point = clampToFrame(x, y, frame)
         const { startX, startY } = drawing.current
         setDraft({
-          x: Math.min(startX, x), y: Math.min(startY, y),
-          w: Math.abs(x - startX), h: Math.abs(y - startY),
+          x: Math.min(startX, point.x), y: Math.min(startY, point.y),
+          w: Math.abs(point.x - startX), h: Math.abs(point.y - startY),
         })
       }
       if (dragging.current) {
         const { id, ox, oy, sx, sy } = dragging.current
-        const dx = (x - sx) / svgSize.w
-        const dy = (y - sy) / svgSize.h
+        const dx = (x - sx) / frame.w
+        const dy = (y - sy) / frame.h
         onChange(units.map(u =>
           u.id === id
             ? { ...u, x: Math.max(0, Math.min(1 - u.width, ox + dx)), y: Math.max(0, Math.min(1 - u.height, oy + dy)) }
@@ -117,14 +153,15 @@ export default function MapCanvas({
         const svg = svgRef.current
         if (svg) {
           const rect = svg.getBoundingClientRect()
-          const x = e.clientX - rect.left
-          const y = e.clientY - rect.top
+          const rawX = e.clientX - rect.left
+          const rawY = e.clientY - rect.top
+          const { x, y } = clampToFrame(rawX, rawY, frame)
           const { startX, startY } = drawing.current
-          const nw = Math.abs(x - startX) / svgSize.w
-          const nh = Math.abs(y - startY) / svgSize.h
+          const nw = Math.abs(x - startX) / frame.w
+          const nh = Math.abs(y - startY) / frame.h
           if (nw > 0.015 && nh > 0.015) {
-            const nx = Math.min(startX, x) / svgSize.w
-            const ny = Math.min(startY, y) / svgSize.h
+            const nx = (Math.min(startX, x) - frame.x) / frame.w
+            const ny = (Math.min(startY, y) - frame.y) / frame.h
             if (tool === 'grid' && onGridRect) {
               // Hand off to parent — parent shows grid config panel
               onGridRect({ x: nx, y: ny, width: nw, height: nh })
@@ -132,7 +169,7 @@ export default function MapCanvas({
               const newUnit: CanvasUnit = {
                 id: uid(),
                 unit_code: `U-${String(units.length + 1).padStart(2, '0')}`,
-                unit_type: 'house', x: nx, y: ny, width: nw, height: nh,
+                unit_type: 'house', x: nx, y: ny, width: nw, height: nh, rotation: 0,
               }
               onChange([...units, newUnit])
               onSelect(newUnit.id)
@@ -151,7 +188,7 @@ export default function MapCanvas({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [units, onChange, onSelect, svgSize])
+  }, [units, onChange, onSelect, svgSize, frame, tool, onGridRect])
 
   function svgCoords(e: React.MouseEvent) {
     const svg = svgRef.current!
@@ -164,8 +201,9 @@ export default function MapCanvas({
     e.preventDefault()
     const { x, y } = svgCoords(e)
     if (tool === 'draw' || tool === 'grid') {
-      drawing.current = { startX: x, startY: y }
-      setDraft({ x, y, w: 0, h: 0 })
+      const start = clampToFrame(x, y, frame)
+      drawing.current = { startX: start.x, startY: start.y }
+      setDraft({ x: start.x, y: start.y, w: 0, h: 0 })
       onSelect(null)
     }
   }
@@ -207,8 +245,8 @@ export default function MapCanvas({
         {bgImageUrl && (
           <image
             href={bgImageUrl}
-            x={0} y={0}
-            width={svgSize.w} height={svgSize.h}
+            x={frame.x} y={frame.y}
+            width={frame.w} height={frame.h}
             opacity={0.45}
             preserveAspectRatio="xMidYMid meet"
             style={{ pointerEvents: 'none' }}
@@ -217,10 +255,13 @@ export default function MapCanvas({
 
         {/* Units */}
         {units.map(u => {
-          const px = u.x * svgSize.w
-          const py = u.y * svgSize.h
-          const pw = u.width * svgSize.w
-          const ph = u.height * svgSize.h
+          const px = frame.x + u.x * frame.w
+          const py = frame.y + u.y * frame.h
+          const pw = u.width * frame.w
+          const ph = u.height * frame.h
+          const rotation = u.rotation ?? 0
+          const cx = px + pw / 2
+          const cy = py + ph / 2
           const style = TYPE_STYLE[u.unit_type] ?? TYPE_STYLE.house
           const isSelected = u.id === selectedId
           // Fill: progress color in PM view, otherwise plain type fill (subcon shown as bottom line, not fill)
@@ -230,6 +271,7 @@ export default function MapCanvas({
 
           return (
             <g key={u.id}
+              transform={rotation ? `rotate(${rotation} ${cx} ${cy})` : undefined}
               style={{ cursor: readOnly ? 'pointer' : tool === 'delete' ? 'not-allowed' : tool === 'select' ? 'move' : 'default' }}
               onMouseDown={e => handleUnitMouseDown(e, u.id)}>
 

@@ -1,0 +1,45 @@
+You are analyzing an Indonesian residential housing site plan (denah kavling / blok plan).
+
+The image contains multiple rectangular sections (blok) of residential parcels. Each section consists of a uniform grid of identically-sized lots arranged in rows and columns. All lots in one section share the same prefix (e.g., all labeled 3J1, 3J2, 3J3... or F1, F2, F3...).
+
+YOUR TASK: Identify each rectangular grid section and return its STRUCTURE — not individual cells.
+
+For EACH grid section:
+1. Find the TIGHT bounding box around ALL lots in that section (exclude surrounding roads, labels, whitespace).
+2. Count the EXACT number of rows (horizontal layers top-to-bottom) and columns (lots in one horizontal strip left-to-right).
+3. Read the prefix:
+   - "3J1", "3J2", "3J20" -> prefix "3J"
+   - "3H23b", "3H1" -> prefix "3H"
+   - "F1", "F25" -> prefix "F"
+   - "G23" -> prefix "G"
+4. start_number: lowest lot number visible. Usually 1. If a group starts at 21 (1-20 are in a separate group to the left), use 21.
+
+Rules:
+- Same prefix separated by a road = TWO separate grid entries with different start_number.
+- Count only actual lot cells, NOT road strips or dimension labels.
+- Bounding box must be TIGHT around the lots only.
+- All coordinates normalized 0-1 relative to full image dimensions. x,y = top-left corner.
+- rows and cols must be whole positive integers.
+
+Return a JSON object with this EXACT structure (no markdown, no explanation, just the JSON):
+{
+  "detected_grids": [
+    {
+      "temp_id": "g_01",
+      "prefix": "3J",
+      "rows": 1,
+      "cols": 20,
+      "start_number": 1,
+      "bounding_box": { "x": 0.01, "y": 0.03, "width": 0.47, "height": 0.08 },
+      "confidence": 0.95
+    }
+  ],
+  "non_grid_areas": [
+    {
+      "temp_id": "a_01",
+      "area_type": "road",
+      "label": "Jalan Utama",
+      "bounding_box": { "x": 0.0, "y": 0.9, "width": 1.0, "height": 0.1 }
+    }
+  ]
+}

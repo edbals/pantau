@@ -3,6 +3,49 @@
 
 ---
 
+## Session: Gemini Site Plan Digitize Hardening
+**Date:** June 2026
+**Status:** Complete — digitize endpoint compiles and production build passes
+
+### What changed
+- Reworked `app/api/v1/projects/[id]/map/digitize/route.ts` for more reliable Gemini sitemap/site-plan extraction.
+- Added explicit Node runtime because the route uses `sharp`.
+- Normalizes uploaded images to JPEG before sending to Gemini, including HEIC/WebP/PNG inputs.
+- Creates real overlapping left/right crop passes for large plans and remaps crop-relative coordinates back to full-canvas normalized coordinates.
+- Uses stable Gemini model fallbacks: `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`.
+- Adds Gemini structured JSON schema, high media resolution for images, request timeout handling, and better API error propagation.
+- Replaced old center-distance dedupe that could merge adjacent dense lots with overlap/label-aware dedupe.
+- Relaxed ghost filtering so small valid lots are not thrown away.
+- Returns diagnostics per pass in the API response for debugging.
+- Follow-up after real screenshot test: Gemini was detecting FASOS/common-area boxes instead of lots.
+  - Tightened prompt/schema so digitize returns only `house` parcel units.
+  - Added overlapping 3x2/2x3 local OCR tile passes for dense plans.
+  - Added lot-code extraction/filtering so only labels like `F1`, `G25`, `H23a` survive.
+  - Blocks `BLOK`, `JALAN`, `FASOS`, `FASUM`, `TAMAN`, dimensions, compass, legend, and title text from becoming fake units.
+  - Batched Gemini calls with concurrency 2 to reduce rate-limit failures.
+- Follow-up for tilted/angled plans:
+  - Added `rotation?: number` to `CanvasUnit`.
+  - `MapCanvas` now renders rotated unit rectangles around their centers.
+  - `MapCanvas` now maps unit coordinates to the actual displayed image frame, not the full SVG, so `preserveAspectRatio="meet"` letterboxing does not offset Gemini coordinates.
+  - Map Studio has a manual `Kemiringan` angle control and `Analisis ulang` action. It rotates the uploaded image in-browser before sending it to Gemini and displays the same rotated image as the background.
+  - Selected units have manual rotation controls (`-1°`, `+1°`, reset, numeric input).
+  - Gemini schema/prompt now includes `rotation_degrees` for detected parcels.
+  - Cleaned the React Compiler lint error in `app/projects/[id]/page.tsx` by avoiding sync state clearing inside an effect.
+- `sharp` is now listed in `package.json` and `package-lock.json`.
+
+### Verification
+- `npx tsc --noEmit` ✅
+- `npx eslint 'app/api/v1/projects/[id]/map/digitize/route.ts'` ✅
+- `npx eslint 'app/api/v1/projects/[id]/map/digitize/route.ts' 'app/projects/[id]/map/page.tsx' components/map/MapCanvas.tsx` ✅
+- `npm run lint` ✅ exits 0 with 3 existing warnings.
+- `npm run build` ✅ earlier after allowing network access for Google Fonts.
+- Latest build re-run after tilted-plan changes was not completed because the environment rejected the required network escalation; rerun `npm run build` when allowed.
+- Remaining lint warnings are pre-existing unused variables in `app/api/v1/projects/[id]/route.ts`, `app/api/v1/submissions/[id]/review/route.ts`, and `app/spk/new/page.tsx`.
+
+### Notes
+- A Next dev server was already running for this repo on `http://localhost:3000` when this session ended.
+- The Gemini key variable exists in `.env.local`; do not print or commit it.
+
 ## Session: Phase 2–6 — Map Studio, SPK, Field Flow, Review, PM Dashboard
 **Date:** June 2026
 **Status:** ✅ Complete — ready for Go Live + Phase 7 hardening

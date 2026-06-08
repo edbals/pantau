@@ -1,10 +1,80 @@
 'use client'
 
-import { useState, useEffect, useCallback, use } from 'react'
+import { useState, useEffect, useCallback, useRef, use } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'spk' | 'supervisor'
+
+interface MapDraft {
+  units: CanvasUnit[]
+  savedAt: string
+}
+
+type ValidationIssue =
+  | { type: 'duplicate'; codes: string[] }
+  | { type: 'gap'; prefix: string; gaps: string[] }
+  | { type: 'missing_suffix'; missing: string }
+
+function validateUnitCodes(units: CanvasUnit[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const codes = units.map(u => u.unit_code).filter(Boolean)
+
+  const seen = new Set<string>()
+  const dupes: string[] = []
+  for (const code of codes) {
+    if (seen.has(code)) dupes.push(code)
+    else seen.add(code)
+  }
+  if (dupes.length > 0) issues.push({ type: 'duplicate', codes: dupes })
+
+  const byPrefix = new Map<string, number[]>()
+  for (const code of codes) {
+    const match = code.match(/^(.+)-(\d+)[A-Z]?$/)
+    if (match) {
+      const prefix = match[1]
+      const num = parseInt(match[2])
+      const existing = byPrefix.get(prefix) ?? []
+      byPrefix.set(prefix, [...existing, num])
+    }
+  }
+  for (const [prefix, nums] of byPrefix) {
+    const unique = [...new Set(nums)].sort((a, b) => a - b)
+    if (unique.length < 2) continue
+    for (let i = unique[0] + 1; i < unique[unique.length - 1]; i++) {
+      if (!unique.includes(i)) {
+        const existing = issues.find(iss => iss.type === 'gap' && iss.prefix === prefix)
+        if (existing && existing.type === 'gap') {
+          existing.gaps = [...existing.gaps, `${prefix}-${String(i).padStart(2, '0')}`]
+        } else {
+          issues.push({ type: 'gap', prefix, gaps: [`${prefix}-${String(i).padStart(2, '0')}`] })
+        }
+        if (issues.filter(iss => iss.type === 'gap').length >= 5) break
+      }
+    }
+  }
+
+  const byBase = new Map<string, string[]>()
+  for (const code of codes) {
+    const match = code.match(/^(.+-\d+)([A-Z])$/)
+    if (match) {
+      const base = match[1]
+      const suffix = match[2]
+      const existing = byBase.get(base) ?? []
+      byBase.set(base, [...existing, suffix])
+    }
+  }
+  for (const [base, suffixes] of byBase) {
+    if (suffixes.includes('A') && !suffixes.includes('B')) {
+      issues.push({ type: 'missing_suffix', missing: `${base}B` })
+    }
+    if (suffixes.includes('B') && !suffixes.includes('A')) {
+      issues.push({ type: 'missing_suffix', missing: `${base}A` })
+    }
+  }
+
+  return issues
+}
 
 const UNIT_TYPES: { value: UnitType; label: string; icon: string }[] = [
   { value: 'house', label: 'Rumah', icon: '🏠' },
@@ -41,8 +111,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [saved, setSaved] = useState(false)
   const [digitizing, setDigitizing] = useState(false)
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null)
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
+  const [planRotation, setPlanRotation] = useState(0)
   const [detectCount, setDetectCount] = useState<number | null>(null)
   const [detectError, setDetectError] = useState<string | null>(null)
+  const [detectDiag, setDetectDiag] = useState<{ model: string | null; grids: number; areas: number } | null>(null)
   const [gridRect, setGridRect] = useState<GridRect | null>(null)
   const [gridRows, setGridRows] = useState('2')
   const [gridCols, setGridCols] = useState('10')
@@ -50,43 +123,56 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [gridStart, setGridStart] = useState('1')
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
-  const [unitCode, setUnitCode] = useState('')
-  const [unitLabel, setUnitLabel] = useState('')
+  const [isDirty, setIsDirty] = useState(false)
+  const [draftUnits, setDraftUnits] = useState<CanvasUnit[] | null>(null)
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
+  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
+  const initialUnitsRef = useRef<CanvasUnit[] | null>(null)
+  const draftKey = `pantau_map_${id}`
 
   const selected = units.find(u => u.id === selectedId) ?? null
 
-  // Load project
+  // Load project, then check for unsaved localStorage draft
   useEffect(() => {
     fetch(`/api/v1/projects/${id}`)
       .then(r => r.json())
       .then(j => {
-        if (j.data) {
-          setProject({ name: j.data.name, project_code: j.data.project_code })
-          if (j.data.canvas_data?.units) setUnits(j.data.canvas_data.units)
-        }
+        if (!j.data) return
+        setProject({ name: j.data.name, project_code: j.data.project_code })
+        const serverUnits: CanvasUnit[] = j.data.canvas_data?.units ?? []
+        setUnits(serverUnits)
+        initialUnitsRef.current = serverUnits
+
+        try {
+          const raw = localStorage.getItem(`pantau_map_${id}`)
+          if (raw) {
+            const draft = JSON.parse(raw) as MapDraft
+            if (draft.units?.length > 0) {
+              setDraftUnits(draft.units)
+              setDraftSavedAt(draft.savedAt)
+            }
+          }
+        } catch {}
       })
   }, [id])
 
-  // Sync selected unit fields
-  useEffect(() => {
-    if (selected) {
-      setUnitCode(selected.unit_code)
-      setUnitLabel(selected.label ?? '')
-    }
-  }, [selectedId])
-
   function updateSelected(patch: Partial<CanvasUnit>) {
     if (!selectedId) return
+    setIsDirty(true)
     setUnits(prev => prev.map(u => u.id === selectedId ? { ...u, ...patch } : u))
   }
 
   const save = useCallback(async () => {
     setSaving(true)
-    await fetch(`/api/v1/projects/${id}/map/save`, {
+    const res = await fetch(`/api/v1/projects/${id}/map/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ canvas_data: { units } }),
     })
+    if (res.ok) {
+      setIsDirty(false)
+      try { localStorage.removeItem(`pantau_map_${id}`) } catch {}
+    }
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -110,18 +196,50 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     return () => window.removeEventListener('keydown', onKey)
   }, [save, selectedId])
 
-  async function handleDigitize(file: File) {
+  // Autosave to localStorage — fires 1.5 s after any user-initiated change
+  useEffect(() => {
+    if (units === initialUnitsRef.current) return
+    if (!isDirty) return
+    const timer = setTimeout(() => {
+      try {
+        const draft: MapDraft = { units, savedAt: new Date().toISOString() }
+        localStorage.setItem(draftKey, JSON.stringify(draft))
+      } catch {}
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [units, isDirty, draftKey])
+
+  // Validation runs on every units change
+  useEffect(() => {
+    setValidationIssues(validateUnitCodes(units))
+  }, [units])
+
+  // Warn before tab close / hard navigation when dirty
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!isDirty) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [isDirty])
+
+  async function handleDigitize(file: File, rotation = planRotation) {
+    setSourceFile(file)
     setDigitizing(true)
     setDetectCount(null)
     setDetectError(null)
-
-    // Show the uploaded image as canvas background immediately
-    const localUrl = URL.createObjectURL(file)
-    setBgImageUrl(localUrl)
+    setDetectDiag(null)
 
     try {
+      const imageForAnalysis = await prepareImageForAnalysis(file, rotation)
+
+      // Show the exact image sent to Gemini so returned coordinates line up.
+      setBgImageUrl(URL.createObjectURL(imageForAnalysis))
+
       const fd = new FormData()
-      fd.append('image', file)
+      fd.append('image', imageForAnalysis)
       const res = await fetch(`/api/v1/projects/${id}/map/digitize`, { method: 'POST', body: fd })
       const json = await res.json()
 
@@ -135,7 +253,17 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         temp_id: string; suggested_code: string; type: UnitType;
         coordinates: { x: number; y: number; width: number; height: number }
         label_detected: string | null
+        rotation_degrees?: number
       }> = json.data?.detected_units ?? []
+
+      const diag = json.data?.diagnostics
+      if (diag) {
+        setDetectDiag({
+          model: diag.model ?? null,
+          grids: diag.grids_detected ?? 0,
+          areas: diag.non_grid_areas ?? 0,
+        })
+      }
 
       if (detected.length > 0) {
         const mapped: CanvasUnit[] = detected.map(d => ({
@@ -144,14 +272,16 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           unit_type: d.type ?? 'house',
           x: d.coordinates.x, y: d.coordinates.y,
           width: d.coordinates.width, height: d.coordinates.height,
+          rotation: normaliseDegrees(d.rotation_degrees ?? 0),
           label: d.label_detected ?? undefined,
         }))
+        setIsDirty(true)
         setUnits(mapped)
         setDetectCount(mapped.length)
       } else {
         setDetectCount(0)
       }
-    } catch (e) {
+    } catch {
       setDetectError('Koneksi gagal — periksa internet dan coba lagi')
     }
 
@@ -180,11 +310,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           y: gridRect.y + r * unitH,
           width: unitW,
           height: unitH,
+          rotation: 0,
         })
         n++
       }
     }
 
+    setIsDirty(true)
     setUnits(prev => [...prev, ...newUnits])
     setGridRect(null)
     setTool('select')
@@ -229,18 +361,52 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
         <div className="flex-1" />
 
+        {sourceFile && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg"
+            style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+            <span className="text-[10px]" style={{ color: 'var(--t3)' }}>Kemiringan</span>
+            <button onClick={() => setPlanRotation(r => roundAngle(r - 1))}
+              className="px-1.5 py-0.5 rounded text-[11px]"
+              style={{ background: 'var(--bg-3)', color: 'var(--t2)' }}>
+              -1°
+            </button>
+            <input type="number" step="0.5" value={planRotation}
+              onChange={e => setPlanRotation(roundAngle(Number(e.target.value) || 0))}
+              className="w-14 px-1.5 py-0.5 rounded text-[11px] font-mono text-center outline-none"
+              style={{ background: 'var(--bg-3)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+            <button onClick={() => setPlanRotation(r => roundAngle(r + 1))}
+              className="px-1.5 py-0.5 rounded text-[11px]"
+              style={{ background: 'var(--bg-3)', color: 'var(--t2)' }}>
+              +1°
+            </button>
+            <button onClick={() => handleDigitize(sourceFile, planRotation)} disabled={digitizing}
+              className="px-2 py-0.5 rounded text-[11px] font-medium"
+              style={{ background: 'var(--accent-sub)', color: 'var(--accent-2)', border: '1px solid rgba(124,58,237,0.25)' }}>
+              Analisis ulang
+            </button>
+          </div>
+        )}
+
         {/* Upload site plan */}
         <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium cursor-pointer"
           style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>
           {digitizing ? '⏳ Menganalisis...' : '📂 Upload Denah'}
           <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.heic,.pdf"
-            onChange={e => e.target.files?.[0] && handleDigitize(e.target.files[0])} />
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) handleDigitize(file, planRotation)
+              e.currentTarget.value = ''
+            }} />
         </label>
 
         <button onClick={save} disabled={saving}
           className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
-          style={{ background: 'var(--bg-3)', color: saving ? 'var(--t3)' : saved ? 'var(--green)' : 'var(--t2)', border: '1px solid var(--border-md)' }}>
-          {saving ? 'Menyimpan...' : saved ? '✓ Tersimpan' : '💾 Simpan'}
+          style={{
+            background: 'var(--bg-3)',
+            color: saving ? 'var(--t3)' : saved ? 'var(--green)' : isDirty ? 'var(--amber)' : 'var(--t2)',
+            border: `1px solid ${isDirty && !saving && !saved ? 'rgba(245,158,11,0.4)' : 'var(--border-md)'}`,
+          }}>
+          {saving ? 'Menyimpan...' : saved ? '✓ Tersimpan' : isDirty ? '● Belum disimpan' : '💾 Simpan'}
         </button>
 
         <button onClick={goLive}
@@ -283,8 +449,26 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
         {/* Canvas */}
         <div className="flex-1 overflow-hidden relative">
+
+          {/* Draft recovery banner */}
+          {draftUnits && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium"
+              style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: 'var(--amber)', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
+              <span>💾 Ditemukan draft yang belum disimpan ({draftSavedAt ? new Date(draftSavedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '?'})</span>
+              <button onClick={() => { setIsDirty(true); setUnits(draftUnits); setDraftUnits(null) }}
+                className="px-3 py-1 rounded-lg text-xs font-semibold"
+                style={{ background: 'rgba(245,158,11,0.3)', color: 'var(--amber)' }}>
+                Pulihkan
+              </button>
+              <button onClick={() => { setDraftUnits(null); try { localStorage.removeItem(draftKey) } catch {} }}
+                className="opacity-60 hover:opacity-100 text-xs">
+                Abaikan ×
+              </button>
+            </div>
+          )}
+
           <MapCanvas
-            units={units} onChange={setUnits}
+            units={units} onChange={(u) => { setIsDirty(true); setUnits(u) }}
             selectedId={selectedId} onSelect={setSelectedId}
             tool={tool}
             bgImageUrl={bgImageUrl ?? undefined}
@@ -305,22 +489,39 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
                     <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Baris</label>
-                    <input type="number" min="1" max="50" value={gridRows}
-                      onChange={e => setGridRows(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
-                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setGridRows(r => String(Math.max(1, (parseInt(r) || 1) - 1)))}
+                        className="px-2 py-1.5 rounded text-sm font-bold"
+                        style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>−</button>
+                      <input type="number" min="1" max="50" value={gridRows}
+                        onChange={e => setGridRows(e.target.value)}
+                        className="flex-1 px-1 py-1.5 rounded text-sm outline-none text-center font-mono"
+                        style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                      <button onClick={() => setGridRows(r => String(Math.min(50, (parseInt(r) || 1) + 1)))}
+                        className="px-2 py-1.5 rounded text-sm font-bold"
+                        style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>+</button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Kolom</label>
-                    <input type="number" min="1" max="100" value={gridCols}
-                      onChange={e => setGridCols(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
-                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setGridCols(c => String(Math.max(1, (parseInt(c) || 1) - 1)))}
+                        className="px-2 py-1.5 rounded text-sm font-bold"
+                        style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>−</button>
+                      <input type="number" min="1" max="100" value={gridCols}
+                        onChange={e => setGridCols(e.target.value)}
+                        className="flex-1 px-1 py-1.5 rounded text-sm outline-none text-center font-mono"
+                        style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                      <button onClick={() => setGridCols(c => String(Math.min(100, (parseInt(c) || 1) + 1)))}
+                        className="px-2 py-1.5 rounded text-sm font-bold"
+                        style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>+</button>
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Prefiks (cth. F, G)</label>
+                    <label className="block text-[11px] mb-1" style={{ color: 'var(--t2)' }}>Prefiks (cth. 3J, F, G)</label>
                     <input type="text" maxLength={5} value={gridPrefix}
                       onChange={e => setGridPrefix(e.target.value.toUpperCase())}
+                      placeholder="3J"
                       className="w-full px-2.5 py-1.5 rounded text-sm outline-none text-center font-mono"
                       style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
                   </div>
@@ -353,6 +554,26 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             </div>
           )}
 
+          {/* Validation issues panel */}
+          {validationIssues.length > 0 && !gridRect && !digitizing && (
+            <div className="absolute bottom-14 right-4 max-w-xs z-10">
+              <div className="rounded-xl p-3 text-[11px] space-y-1.5"
+                style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)', backdropFilter: 'blur(8px)' }}>
+                <p className="font-semibold" style={{ color: 'var(--amber)' }}>⚠ Periksa kode unit</p>
+                {validationIssues.slice(0, 4).map((issue, i) => (
+                  <p key={i} style={{ color: 'var(--t2)' }}>
+                    {issue.type === 'duplicate' && `Duplikat: ${issue.codes.slice(0, 3).join(', ')}`}
+                    {issue.type === 'gap' && `${issue.prefix}: hilang ${issue.gaps.slice(0, 3).join(', ')}`}
+                    {issue.type === 'missing_suffix' && `Mungkin hilang: ${issue.missing}`}
+                  </p>
+                ))}
+                {validationIssues.length > 4 && (
+                  <p style={{ color: 'var(--t3)' }}>+{validationIssues.length - 4} masalah lainnya</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Grid tool hint */}
           {tool === 'grid' && !gridRect && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-[12px] font-medium pointer-events-none"
@@ -375,20 +596,21 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
           {/* Detection result / error banner */}
           {(detectCount !== null || detectError) && !digitizing && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 max-w-lg"
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium flex items-start gap-2 max-w-lg"
               style={{
                 background: detectError ? 'rgba(239,68,68,0.15)' : detectCount! > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)',
                 border: `1px solid ${detectError ? 'rgba(239,68,68,0.4)' : detectCount! > 0 ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)'}`,
                 color: detectError ? 'var(--red)' : detectCount! > 0 ? 'var(--green)' : 'var(--amber)',
                 backdropFilter: 'blur(8px)',
-                whiteSpace: 'nowrap',
               }}>
               {detectError
                 ? `✕ Error: ${detectError}`
                 : detectCount! > 0
-                  ? `✓ Gemini mendeteksi ${detectCount} unit — periksa & sesuaikan, lalu simpan`
-                  : '⚠ Tidak ada unit terdeteksi — lihat terminal untuk detail, atau gambar manual'}
-              <button onClick={() => { setDetectCount(null); setDetectError(null) }}
+                  ? `✓ Gemini (${detectDiag?.model ?? 'AI'}) mendeteksi ${detectCount} unit — periksa & sesuaikan, lalu simpan`
+                  : detectDiag
+                    ? `⚠ AI tidak menemukan blok unit (${detectDiag.model ?? 'model'}: ${detectDiag.grids} grid, ${detectDiag.areas} area). Coba foto lebih jelas, atau pakai alat Grid manual.`
+                    : '⚠ Tidak ada unit terdeteksi — coba foto lebih jelas, atau pakai alat Grid manual.'}
+              <button onClick={() => { setDetectCount(null); setDetectError(null); setDetectDiag(null) }}
                 className="ml-2 opacity-60 hover:opacity-100 flex-shrink-0">×</button>
             </div>
           )}
@@ -427,18 +649,40 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   Unit Dipilih
                 </p>
                 <div className="flex gap-2 mb-2">
-                  <input value={unitCode}
-                    onChange={e => setUnitCode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
-                    onBlur={() => updateSelected({ unit_code: unitCode })}
+                  <input value={selected.unit_code}
+                    onChange={e => updateSelected({ unit_code: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '') })}
                     placeholder="Kode"
                     className="flex-1 px-2 py-1.5 rounded text-[12px] font-mono outline-none"
                     style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
-                  <input value={unitLabel}
-                    onChange={e => setUnitLabel(e.target.value)}
-                    onBlur={() => updateSelected({ label: unitLabel || undefined })}
+                  <input value={selected.label ?? ''}
+                    onChange={e => updateSelected({ label: e.target.value || undefined })}
                     placeholder="Label"
                     className="flex-1 px-2 py-1.5 rounded text-[12px] outline-none"
                     style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                </div>
+                <div className="mb-2">
+                  <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Rotasi unit</label>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => updateSelected({ rotation: roundAngle((selected.rotation ?? 0) - 1) })}
+                      className="px-2 py-1 rounded text-[11px]"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t2)' }}>
+                      -1°
+                    </button>
+                    <input type="number" step="0.5" value={selected.rotation ?? 0}
+                      onChange={e => updateSelected({ rotation: normaliseDegrees(Number(e.target.value) || 0) })}
+                      className="flex-1 px-2 py-1 rounded text-[12px] font-mono text-center outline-none"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                    <button onClick={() => updateSelected({ rotation: roundAngle((selected.rotation ?? 0) + 1) })}
+                      className="px-2 py-1 rounded text-[11px]"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t2)' }}>
+                      +1°
+                    </button>
+                    <button onClick={() => updateSelected({ rotation: 0 })}
+                      className="px-2 py-1 rounded text-[11px]"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t3)' }}>
+                      Reset
+                    </button>
+                  </div>
                 </div>
                 <button onClick={() => { setUnits(p => p.filter(u => u.id !== selectedId)); setSelectedId(null) }}
                   className="w-full py-1.5 rounded text-[11px] font-medium"
@@ -549,4 +793,63 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       </div>
     </div>
   )
+}
+
+function roundAngle(value: number): number {
+  return Math.round(normaliseDegrees(value) * 10) / 10
+}
+
+function normaliseDegrees(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  let angle = value % 360
+  if (angle > 180) angle -= 360
+  if (angle < -180) angle += 360
+  return angle
+}
+
+async function prepareImageForAnalysis(file: File, rotation: number): Promise<File> {
+  const angle = roundAngle(rotation)
+  if (file.type === 'application/pdf' || Math.abs(angle) < 0.01) return file
+
+  const imageUrl = URL.createObjectURL(file)
+  try {
+    const image = await loadImage(imageUrl)
+    const radians = angle * Math.PI / 180
+    const sin = Math.abs(Math.sin(radians))
+    const cos = Math.abs(Math.cos(radians))
+    const width = image.naturalWidth
+    const height = image.naturalHeight
+    const rotatedWidth = Math.ceil(width * cos + height * sin)
+    const rotatedHeight = Math.ceil(width * sin + height * cos)
+    const canvas = document.createElement('canvas')
+    canvas.width = rotatedWidth
+    canvas.height = rotatedHeight
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas is not available')
+
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, rotatedWidth, rotatedHeight)
+    ctx.translate(rotatedWidth / 2, rotatedHeight / 2)
+    ctx.rotate(radians)
+    ctx.drawImage(image, -width / 2, -height / 2)
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(result => result ? resolve(result) : reject(new Error('Could not rotate image')), 'image/jpeg', 0.92)
+    })
+
+    const baseName = file.name.replace(/\.[^.]+$/, '') || 'denah'
+    return new File([blob], `${baseName}-rotated.jpg`, { type: 'image/jpeg' })
+  } finally {
+    URL.revokeObjectURL(imageUrl)
+  }
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Could not load image for rotation'))
+    image.src = src
+  })
 }

@@ -50,7 +50,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   }, [id])
 
   useEffect(() => {
-    if (!selectedId) { setUnitDetail(null); return }
+    if (!selectedId) return
     fetch(`/api/v1/units/${selectedId}`)
       .then(r => r.json())
       .then(j => setUnitDetail(j.data))
