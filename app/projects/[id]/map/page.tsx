@@ -17,13 +17,12 @@ import {
   materializeGrid,
   captureCellOverrides,
   parseGridCellId,
-  gridBoundsFromUnits,
   type GridBlock,
 } from '@/lib/digitize/grid-block'
-import { tidyLayout } from '@/lib/digitize/tidy-layout'
+import { tidyLayout, tidyGrids } from '@/lib/digitize/tidy-layout'
 import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
-  Magnet, Sparkles, Loader2, Upload, Save as SaveIcon, Rocket,
+  Magnet, Sparkles, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
 } from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
@@ -91,6 +90,8 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   // current without re-binding the listener on every tool change.
   const toolRef = useRef<Tool>(tool)
   const spacePan = useRef<{ prevTool: Tool } | null>(null)
+  // Clipboard for copy/paste of a whole grid block.
+  const gridClipboard = useRef<GridBlock | null>(null)
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -301,11 +302,26 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     if (tidyRaf.current !== null) return // a tween is already running
     const before = units
     const beforeGrids = gridsRef.current
-    const target = tidyLayout(before, { imageAspect })
-    const moved = target !== before && target.some((u, i) => {
+
+    // Primary path: solve on the GridBlock entities (bbox centroids), then
+    // re-materialize. Fall back to flat-unit tidy only when there are no grids.
+    let targetGrids = beforeGrids
+    let target: CanvasUnit[]
+    if (beforeGrids.length > 0) {
+      targetGrids = tidyGrids(beforeGrids, { imageAspect })
+      const free = before.filter(u => !parseGridCellId(u.id))
+      target = [
+        ...targetGrids.flatMap(g => materializeGrid(captureCellOverrides(g, before))),
+        ...free,
+      ]
+    } else {
+      target = tidyLayout(before, { imageAspect })
+    }
+
+    const moved = target !== before && (target.length !== before.length || target.some((u, i) => {
       const b = before[i]
-      return !b || b.x !== u.x || b.y !== u.y || b.width !== u.width || b.height !== u.height
-    })
+      return !b || b.id !== u.id || b.x !== u.x || b.y !== u.y || b.width !== u.width || b.height !== u.height
+    }))
     if (!moved) return
 
     setTidying(true)
@@ -338,21 +354,16 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         tidyRaf.current = requestAnimationFrame(step)
         return
       }
-      // Settle: snap to the exact target and commit one history entry. Tidy
-      // moved grid cells directly, so resync each grid's bbox to its new cells.
+      // Settle: snap to the exact target + the solved grid bboxes; one undo step.
       tidyRaf.current = null
       animating.current = false
       skipHistory.current = true // the commit below must not double-push history
-      const newGrids = beforeGrids.map(g => {
-        const bb = gridBoundsFromUnits(g.id, target)
-        return bb ? { ...g, bbox: bb } : g
-      })
       setUnits(target)
-      setGrids(newGrids)
+      setGrids(targetGrids)
       undoStack.current.push({ units: before, grids: beforeGrids })
       if (undoStack.current.length > 50) undoStack.current.shift()
       redoStack.current = []
-      histBaseline.current = { units: target, grids: newGrids }
+      histBaseline.current = { units: target, grids: targetGrids }
       setIsDirty(true)
       setTidying(false)
       syncHistFlags()
@@ -404,6 +415,37 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         if (!spacePan.current) {
           spacePan.current = { prevTool: toolRef.current }
           setTool('hand')
+        }
+        return
+      }
+      // Copy / paste a whole grid block.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+        const gids = new Set(selectedIds.map(id => parseGridCellId(id)?.gridId).filter((x): x is string => !!x))
+        const gid = gids.size === 1 ? [...gids][0] : null
+        const g = gid ? gridsRef.current.find(x => x.id === gid) : null
+        if (g) { e.preventDefault(); gridClipboard.current = g }
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+        const src = gridClipboard.current
+        if (src) {
+          e.preventDefault()
+          const grid: GridBlock = {
+            ...src,
+            id: `grid_${Date.now()}`,
+            bbox: {
+              x: Math.min(0.95, Math.max(0, src.bbox.x + 0.03)),
+              y: Math.min(0.95, Math.max(0, src.bbox.y + 0.03)),
+              width: src.bbox.width,
+              height: src.bbox.height,
+            },
+            cellOverrides: undefined, // fresh clone of structure, not assignments
+          }
+          const cells = materializeGrid(grid)
+          setIsDirty(true)
+          setGrids(prev => [...prev, grid])
+          setUnits(prev => [...prev, ...cells])
+          setSelectedIds(cells.map(c => c.id))
         }
         return
       }
@@ -464,6 +506,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     // new result fully replaces the old one (and never half-merges on retry).
     setSelectedIds([])
     setUnits([])
+    setGrids([])
 
     try {
       const imageForAnalysis = await prepareImageForAnalysis(file, rotation)
@@ -482,12 +525,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         return
       }
 
-      const detected: Array<{
-        temp_id: string; suggested_code: string; type: UnitType;
-        coordinates: { x: number; y: number; width: number; height: number }
-        label_detected: string | null
-        rotation_degrees?: number
-      }> = json.data?.detected_units ?? []
+      type Box = { x: number; y: number; width: number; height: number }
+      const detectedGrids: Array<{
+        prefix: string; rows: number; cols: number; start_number: number; bounding_box: Box
+      }> = json.data?.detected_grids ?? []
+      const nonGridAreas: Array<{
+        area_type: UnitType; label: string | null; bounding_box: Box
+      }> = json.data?.non_grid_areas ?? []
 
       const diag = json.data?.diagnostics
       if (diag) {
@@ -498,21 +542,61 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         })
       }
 
-      if (detected.length > 0) {
-        const mapped: CanvasUnit[] = detected.map(d => ({
-          id: d.temp_id,
-          unit_code: d.suggested_code ?? d.temp_id,
-          unit_type: d.type ?? 'house',
-          x: d.coordinates.x, y: d.coordinates.y,
-          width: d.coordinates.width, height: d.coordinates.height,
-          rotation: normaliseDegrees(d.rotation_degrees ?? 0),
-          label: d.label_detected ?? undefined,
+      // Primary path: instantiate AI-detected blocks as editable GridBlocks so
+      // they behave identically to manual grids (clickable, handles, config panel).
+      if (detectedGrids.length > 0 || nonGridAreas.length > 0) {
+        const stamp = Date.now()
+        const newGrids: GridBlock[] = detectedGrids.map((g, i) => ({
+          id: `grid_${stamp}_${i}`,
+          prefix: g.prefix,
+          rows: g.rows,
+          cols: g.cols,
+          start: g.start_number,
+          bbox: g.bounding_box,
+          skipRules: [],
+          unitType: 'house',
         }))
+        const gridUnits = newGrids.flatMap(materializeGrid)
+        // Roads / common areas are free (non-grid) units kept alongside the grids.
+        const areaUnits: CanvasUnit[] = nonGridAreas.map((a, i) => ({
+          id: `area_${stamp}_${i}`,
+          unit_code: a.label ?? '',
+          unit_type: a.area_type ?? 'road',
+          x: a.bounding_box.x, y: a.bounding_box.y,
+          width: a.bounding_box.width, height: a.bounding_box.height,
+          rotation: 0,
+        }))
+        const all = [...gridUnits, ...areaUnits]
         setIsDirty(true)
-        setUnits(mapped)
-        setDetectCount(countSellableUnits(mapped))
+        setGrids(newGrids)
+        setUnits(all)
+        // Select the first block so its handles + config panel show immediately.
+        if (newGrids.length > 0) {
+          setSelectedIds(gridUnits.filter(u => parseGridCellId(u.id)?.gridId === newGrids[0].id).map(u => u.id))
+        }
+        setDetectCount(countSellableUnits(all))
       } else {
-        setDetectCount(0)
+        // Fallback: flat units (e.g. the stub layout when no API key is set).
+        const detected: Array<{
+          temp_id: string; suggested_code: string; type: UnitType
+          coordinates: Box; label_detected: string | null; rotation_degrees?: number
+        }> = json.data?.detected_units ?? []
+        if (detected.length > 0) {
+          const mapped: CanvasUnit[] = detected.map(d => ({
+            id: d.temp_id,
+            unit_code: d.suggested_code ?? d.temp_id,
+            unit_type: d.type ?? 'house',
+            x: d.coordinates.x, y: d.coordinates.y,
+            width: d.coordinates.width, height: d.coordinates.height,
+            rotation: normaliseDegrees(d.rotation_degrees ?? 0),
+            label: d.label_detected ?? undefined,
+          }))
+          setIsDirty(true)
+          setUnits(mapped)
+          setDetectCount(countSellableUnits(mapped))
+        } else {
+          setDetectCount(0)
+        }
       }
     } catch {
       setDetectError('Koneksi gagal — periksa internet dan coba lagi')
@@ -951,14 +1035,33 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             </div>
           )}
 
-          {/* Gemini loading overlay */}
+          {/* AI analysis overlay — enterprise loading state */}
           {digitizing && (
             <div className="absolute inset-0 flex items-center justify-center"
-              style={{ background: 'rgba(8,10,16,0.75)' }}>
-              <div className="text-center">
-                <div className="text-3xl mb-3 animate-pulse">🤖</div>
-                <p className="text-sm font-medium" style={{ color: 'var(--t1)' }}>Gemini sedang menganalisis denah...</p>
-                <p className="text-xs mt-1" style={{ color: 'var(--t3)' }}>Biasanya 5–15 detik</p>
+              style={{ background: 'rgba(8,12,22,0.82)', backdropFilter: 'blur(3px)' }}>
+              <style>{`@keyframes pantauSweep { 0% { transform: translateX(-120%) } 100% { transform: translateX(320%) } }`}</style>
+              <div className="flex flex-col items-center">
+                <div className="relative flex items-center justify-center mb-5"
+                  style={{ width: 64, height: 64 }}>
+                  <div className="absolute inset-0 rounded-full animate-ping"
+                    style={{ background: 'radial-gradient(circle, rgba(95,208,240,0.35), transparent 70%)' }} />
+                  <BrainCircuit size={40} strokeWidth={1.5}
+                    style={{ color: '#5FD0F0', filter: 'drop-shadow(0 0 14px rgba(95,208,240,0.7))' }} />
+                </div>
+                <p className="text-[13px] font-medium tracking-wide" style={{ color: 'var(--t1)' }}>
+                  Menganalisis denah…
+                </p>
+                <p className="text-[11px] mt-1 mb-4" style={{ color: 'var(--t3)' }}>
+                  AI mengenali blok & nomor unit · biasanya 5–15 detik
+                </p>
+                <div className="h-1 rounded-full overflow-hidden" style={{ width: 220, background: 'rgba(95,208,240,0.12)' }}>
+                  <div className="h-full rounded-full"
+                    style={{
+                      width: '35%',
+                      background: 'linear-gradient(90deg, transparent, #5FD0F0, transparent)',
+                      animation: 'pantauSweep 1.15s ease-in-out infinite',
+                    }} />
+                </div>
               </div>
             </div>
           )}

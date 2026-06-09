@@ -313,6 +313,27 @@ export default function MapCanvas({
           const MIN = 0.02
           if (nw < MIN) { if (h.includes('w')) nx = g.ox + g.ow - MIN; nw = MIN }
           if (nh < MIN) { if (h.includes('n')) ny = g.oy + g.oh - MIN; nh = MIN }
+
+          // Alignment snapping: drag a block's edge near another block's edge to
+          // snap them flush, so heights/columns line up. Alt bypasses.
+          if (snap && !e.altKey && gridBoxes) {
+            const others = Object.entries(gridBoxes).filter(([k]) => k !== g.id).map(([, b]) => b)
+            const yEdges = others.flatMap(b => [b.y, b.y + b.height])
+            const xEdges = others.flatMap(b => [b.x, b.x + b.width])
+            const thrY = 8 / frame.h
+            const thrX = 8 / frame.w
+            const snapTo = (v: number, edges: number[], thr: number) => {
+              let best = v, bestDist = thr
+              for (const edge of edges) { const d = Math.abs(v - edge); if (d < bestDist) { bestDist = d; best = edge } }
+              return best
+            }
+            if (h.includes('n')) { const bottom = ny + nh; ny = snapTo(ny, yEdges, thrY); nh = bottom - ny }
+            if (h.includes('s')) { nh = snapTo(ny + nh, yEdges, thrY) - ny }
+            if (h.includes('w')) { const right = nx + nw; nx = snapTo(nx, xEdges, thrX); nw = right - nx }
+            if (h.includes('e')) { nw = snapTo(nx + nw, xEdges, thrX) - nx }
+            if (nw < MIN) nw = MIN
+            if (nh < MIN) nh = MIN
+          }
         }
         onGridResize(g.id, { x: nx, y: ny, width: nw, height: nh })
         return

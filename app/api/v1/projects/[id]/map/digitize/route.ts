@@ -142,6 +142,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   return ok({
     detected_units: allUnits,
+    // The structural grids/areas so the client can instantiate editable
+    // GridBlock[] (not just flat cells) and let the user fix the AI globally.
+    detected_grids: parsed.grids,
+    non_grid_areas: parsed.nonGrid,
     overall_confidence: parsed.grids.length > 0 ? 0.85 : 0,
     unit_count: allUnits.length,
     diagnostics: {

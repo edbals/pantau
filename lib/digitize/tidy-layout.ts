@@ -15,6 +15,7 @@
 import type { CanvasUnit } from '@/components/map/MapCanvas'
 import { parseUnitCode } from './numbering'
 import { layoutSolver, type SolverBlock } from './layout-solver'
+import type { GridBlock } from './grid-block'
 
 // Infrastructure isn't a sellable lot and never participates in a block grid.
 const INFRASTRUCTURE_TYPES = new Set<CanvasUnit['unit_type']>([
@@ -30,6 +31,27 @@ const DEFAULT_IDEAL_ASPECT = 1
 // A new row starts when a unit's centre sits more than this fraction of the
 // median cell height below the current row's anchor.
 const ROW_BREAK_RATIO = 0.5
+
+// Tidies GridBlock entities directly: feeds their bbox centroids + lot counts to
+// the solver and returns the same grids with collision-free bboxes. This is the
+// primary path (manual + AI grids) — the flat-unit tidyLayout below is the
+// fallback for legacy projects that have no grids.
+export function tidyGrids(grids: GridBlock[], options: TidyOptions = {}): GridBlock[] {
+  if (grids.length === 0) return grids
+  const idealAspect = options.idealAspect ?? DEFAULT_IDEAL_ASPECT
+  const blocks: SolverBlock[] = grids.map(g => ({
+    id: g.id,
+    centroid: { x: g.bbox.x + g.bbox.width / 2, y: g.bbox.y + g.bbox.height / 2 },
+    lots: { rows: g.rows, cols: g.cols },
+    idealAspect,
+    pinned: g.pinned,
+  }))
+  const boxes = layoutSolver(blocks, { imageAspect: options.imageAspect })
+  return grids.map(g => {
+    const box = boxes.get(g.id)
+    return box ? { ...g, bbox: box } : g
+  })
+}
 
 export interface TidyOptions {
   imageAspect?: number // imagePixelWidth / imagePixelHeight of the render frame

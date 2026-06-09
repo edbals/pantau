@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest'
-import { reconstructBlocks, tidyLayout } from './tidy-layout'
+import { reconstructBlocks, tidyLayout, tidyGrids } from './tidy-layout'
 import type { CanvasUnit } from '@/components/map/MapCanvas'
+import type { GridBlock } from './grid-block'
 
 function unit(partial: Partial<CanvasUnit> & Pick<CanvasUnit, 'id' | 'unit_code'>): CanvasUnit {
   return {
@@ -41,6 +42,33 @@ describe('reconstructBlocks', () => {
       unit({ id: 'x1', unit_code: 'garbage' }),
     ])
     expect(blocks).toHaveLength(0)
+  })
+})
+
+describe('tidyGrids', () => {
+  const gb = (id: string, x: number, y: number): GridBlock => ({
+    id, prefix: id.toUpperCase(), rows: 1, cols: 10, start: 1,
+    bbox: { x, y, width: 0.4, height: 0.08 },
+  })
+  const overlaps = (a: GridBlock['bbox'], b: GridBlock['bbox']) =>
+    !(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y)
+
+  test('separates overlapping grid blocks and keeps them in bounds', () => {
+    const out = tidyGrids([gb('a', 0.3, 0.4), gb('b', 0.32, 0.42)], { imageAspect: 1 })
+    expect(overlaps(out[0].bbox, out[1].bbox)).toBe(false)
+    for (const g of out) {
+      expect(g.bbox.x).toBeGreaterThanOrEqual(0.02 - 1e-6)
+      expect(g.bbox.x + g.bbox.width).toBeLessThanOrEqual(0.98 + 1e-6)
+    }
+  })
+
+  test('preserves grid identity and structure (only bbox changes)', () => {
+    const out = tidyGrids([gb('a', 0.3, 0.4)], { imageAspect: 1 })
+    expect(out[0]).toMatchObject({ id: 'a', rows: 1, cols: 10, prefix: 'A' })
+  })
+
+  test('is a no-op for no grids', () => {
+    expect(tidyGrids([])).toEqual([])
   })
 })
 
