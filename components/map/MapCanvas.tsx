@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState, useEffect, useMemo } from 'react'
+import { ZoomIn, ZoomOut, Maximize } from 'lucide-react'
 
 export type UnitType =
   | 'house' | 'apartment' | 'shophouse' | 'commercial' | 'villa'
@@ -237,7 +238,7 @@ export default function MapCanvas({
   // Attach mouse events to the WINDOW so drawing isn't cancelled when
   // the cursor briefly leaves the SVG mid-stroke
   useEffect(() => {
-    function onMove(e: MouseEvent) {
+    function onMove(e: PointerEvent) {
       if (!drawing.current && !dragging.current && !resizing.current && !marquee.current && !panning.current) return
       const svg = svgRef.current
       if (!svg) return
@@ -311,7 +312,7 @@ export default function MapCanvas({
       }
     }
 
-    function onUp(e: MouseEvent) {
+    function onUp(e: PointerEvent) {
       if (drawing.current) {
         const svg = svgRef.current
         if (svg) {
@@ -383,15 +384,15 @@ export default function MapCanvas({
       if (panning.current) { panning.current = null; setIsPanning(false) }
     }
 
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
     return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
     }
   }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, snap, onGridRect]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function svgCoords(e: React.MouseEvent) {
+  function svgCoords(e: React.PointerEvent) {
     const svg = svgRef.current!
     const rect = svg.getBoundingClientRect()
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
@@ -399,7 +400,7 @@ export default function MapCanvas({
 
   // Middle-mouse, or left-drag while the Hand tool is active, starts a pan from
   // anywhere. Returns true if it consumed the event.
-  function maybeStartPan(e: React.MouseEvent): boolean {
+  function maybeStartPan(e: React.PointerEvent): boolean {
     const isMiddle = e.button === 1
     const isHandDrag = tool === 'hand' && e.button === 0
     if (!isMiddle && !isHandDrag) return false
@@ -410,7 +411,7 @@ export default function MapCanvas({
     return true
   }
 
-  function handleSvgMouseDown(e: React.MouseEvent) {
+  function handleSvgPointerDown(e: React.PointerEvent) {
     if (readOnly) return
     if (maybeStartPan(e)) return
     if (e.button !== 0) return
@@ -444,7 +445,7 @@ export default function MapCanvas({
     }
   }
 
-  function handleUnitMouseDown(e: React.MouseEvent, id: string) {
+  function handleUnitPointerDown(e: React.PointerEvent, id: string) {
     if (readOnly) return
     if (maybeStartPan(e)) return
     e.stopPropagation()
@@ -481,7 +482,7 @@ export default function MapCanvas({
     }
   }
 
-  function handleResizeStart(e: React.MouseEvent, id: string, handle: ResizeHandle) {
+  function handleResizeStart(e: React.PointerEvent, id: string, handle: ResizeHandle) {
     if (readOnly || e.button !== 0) return
     e.stopPropagation()
     const u = units.find(uu => uu.id === id)
@@ -511,8 +512,11 @@ export default function MapCanvas({
           backgroundSize: `${GRID_PX * zoom}px ${GRID_PX * zoom}px`,
           backgroundPosition: `${pan.x}px ${pan.y}px`,
           userSelect: 'none',
+          // Stop the browser from scrolling/zooming on touch so pointer drags
+          // drive the canvas instead — foundation for touch/tablet support.
+          touchAction: 'none',
         }}
-        onMouseDown={handleSvgMouseDown}
+        onPointerDown={handleSvgPointerDown}
       >
         {/* Background image — pointer-events:none so it never blocks drawing */}
         {bgImageUrl && (
@@ -546,8 +550,8 @@ export default function MapCanvas({
             <g key={u.id}
               transform={rotation ? `rotate(${rotation} ${cx} ${cy})` : undefined}
               style={{ cursor: readOnly ? 'pointer' : isPanning ? 'grabbing' : tool === 'hand' ? 'grab' : tool === 'delete' ? 'not-allowed' : tool === 'paint' ? 'crosshair' : tool === 'select' ? 'move' : 'default' }}
-              onMouseDown={e => handleUnitMouseDown(e, u.id)}
-              onMouseEnter={() => { if (tool === 'paint' && painting.current) onPaintUnit?.(u.id) }}>
+              onPointerDown={e => handleUnitPointerDown(e, u.id)}
+              onPointerEnter={() => { if (tool === 'paint' && painting.current) onPaintUnit?.(u.id) }}>
 
               {/* Unit body */}
               <rect x={px} y={py} width={pw} height={ph}
@@ -619,7 +623,7 @@ export default function MapCanvas({
                     <rect key={h.k} x={h.hx - 4.5} y={h.hy - 4.5} width={9} height={9}
                       fill="#BFEFFF" stroke="#0A1628" strokeWidth={1.5} rx={1.5}
                       style={{ cursor: h.cursor }}
-                      onMouseDown={e => handleResizeStart(e, u.id, h.k)} />
+                      onPointerDown={e => handleResizeStart(e, u.id, h.k)} />
                   ))}
                 </>
               )}
@@ -694,14 +698,16 @@ export default function MapCanvas({
         <div className="absolute bottom-3 right-3 flex items-center gap-1 px-1.5 py-1 rounded-lg"
           style={{ background: 'rgba(10,22,40,0.85)', border: '1px solid rgba(95,208,240,0.25)', backdropFilter: 'blur(8px)' }}>
           <button onClick={() => zoomBy(1 / 1.25)} title="Perkecil"
-            className="w-6 h-6 rounded flex items-center justify-center text-[14px]"
-            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>−</button>
+            className="w-6 h-6 rounded flex items-center justify-center"
+            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}><ZoomOut size={14} /></button>
           <button onClick={fitView} title="Pas ke layar"
-            className="px-2 h-6 rounded text-[11px] font-mono"
-            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>{Math.round(zoom * 100)}%</button>
+            className="flex items-center gap-1 px-2 h-6 rounded text-[11px] font-mono"
+            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>
+            <Maximize size={12} />{Math.round(zoom * 100)}%
+          </button>
           <button onClick={() => zoomBy(1.25)} title="Perbesar"
-            className="w-6 h-6 rounded flex items-center justify-center text-[14px]"
-            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}>+</button>
+            className="w-6 h-6 rounded flex items-center justify-center"
+            style={{ color: '#BFEFFF', background: 'rgba(95,208,240,0.08)' }}><ZoomIn size={14} /></button>
         </div>
       )}
     </div>

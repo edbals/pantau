@@ -12,6 +12,10 @@ import {
   parseSkipList,
 } from '@/lib/digitize/numbering'
 import { tidyLayout } from '@/lib/digitize/tidy-layout'
+import {
+  Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
+  Magnet, Sparkles, Loader2, Upload, Save as SaveIcon, Rocket,
+} from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
 
@@ -64,6 +68,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   // Render-frame aspect (w/h) reported by the canvas; keeps tidied lots square.
   const [imageAspect, setImageAspect] = useState(1)
   const [tidying, setTidying] = useState(false)
+  // Spacebar-to-pan: while Space is held the canvas behaves as the Hand tool,
+  // then reverts to whatever tool was active. toolRef keeps the keydown closure
+  // current without re-binding the listener on every tool change.
+  const toolRef = useRef<Tool>(tool)
+  const spacePan = useRef<{ prevTool: Tool } | null>(null)
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -280,6 +289,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     if (tidyRaf.current !== null) cancelAnimationFrame(tidyRaf.current)
   }, [])
 
+  // Keep the keyboard closure's view of the active tool current.
+  useEffect(() => { toolRef.current = tool }, [tool])
+
   const save = useCallback(async () => {
     setSaving(true)
     const res = await fetch(`/api/v1/projects/${id}/map/save`, {
@@ -310,6 +322,15 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       // Don't hijack single-letter shortcuts while typing in a field.
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      // Hold Space to temporarily pan (reverts to the prior tool on release).
+      if (e.code === 'Space') {
+        e.preventDefault()
+        if (!spacePan.current) {
+          spacePan.current = { prevTool: toolRef.current }
+          setTool('hand')
+        }
+        return
+      }
       if (e.key === 'v') setTool('select')
       if (e.key === 'h') setTool('hand')
       if (e.key === 'r') setTool('draw')
@@ -321,8 +342,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         setSelectedIds([])
       }
     }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'Space' && spacePan.current) {
+        setTool(spacePan.current.prevTool)
+        spacePan.current = null
+      }
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+    }
   }, [save, selectedIds, undo, redo])
 
   // Autosave to localStorage — fires 1.5 s after any user-initiated change
@@ -546,7 +577,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         {/* Upload site plan */}
         <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium cursor-pointer"
           style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>
-          {digitizing ? '⏳ Menganalisis...' : '📂 Upload Denah'}
+          {digitizing
+            ? <><Loader2 size={14} className="animate-spin" /> Menganalisis...</>
+            : <><Upload size={14} /> Upload Denah</>}
           <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.heic,.pdf"
             onChange={e => {
               const file = e.target.files?.[0]
@@ -556,19 +589,23 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         </label>
 
         <button onClick={save} disabled={saving}
-          className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium"
           style={{
             background: 'var(--bg-3)',
             color: saving ? 'var(--t3)' : saved ? 'var(--green)' : isDirty ? 'var(--amber)' : 'var(--t2)',
             border: `1px solid ${isDirty && !saving && !saved ? 'rgba(245,158,11,0.4)' : 'var(--border-md)'}`,
           }}>
-          {saving ? 'Menyimpan...' : saved ? '✓ Tersimpan' : isDirty ? '● Belum disimpan' : '💾 Simpan'}
+          {saving
+            ? <><Loader2 size={13} className="animate-spin" /> Menyimpan...</>
+            : saved ? '✓ Tersimpan'
+            : isDirty ? '● Belum disimpan'
+            : <><SaveIcon size={13} /> Simpan</>}
         </button>
 
         <button onClick={goLive}
-          className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white"
+          className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white"
           style={{ background: 'var(--green)', boxShadow: '0 0 12px rgba(16,185,129,0.3)' }}>
-          🚀 Go Live
+          <Rocket size={14} /> Go Live
         </button>
       </div>
 
@@ -582,31 +619,31 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             <button onClick={undo} disabled={!canUndo} title="Urungkan (⌘Z)"
               className="w-[26px] h-7 flex items-center justify-center rounded-lg text-[14px] transition-all"
               style={{ background: 'transparent', color: canUndo ? 'var(--t2)' : 'var(--t3)', opacity: canUndo ? 1 : 0.35 }}>
-              ↶
+              <Undo2 size={15} />
             </button>
             <button onClick={redo} disabled={!canRedo} title="Ulangi (⌘⇧Z)"
               className="w-[26px] h-7 flex items-center justify-center rounded-lg text-[14px] transition-all"
               style={{ background: 'transparent', color: canRedo ? 'var(--t2)' : 'var(--t3)', opacity: canRedo ? 1 : 0.35 }}>
-              ↷
+              <Redo2 size={15} />
             </button>
           </div>
 
           <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
 
           {([
-            { t: 'hand'   as Tool, icon: '✋', label: 'Geser',  tip: 'Geser peta (H) — atau seret tombol tengah mouse' },
-            { t: 'select' as Tool, icon: '⬚', label: 'Pilih',  tip: 'Pilih & seret untuk pilih banyak (V)' },
-            { t: 'draw'   as Tool, icon: '✏️', label: 'Gambar', tip: 'Gambar unit (R)' },
-            { t: 'grid'   as Tool, icon: '▦',  label: 'Grid',   tip: 'Grid blok otomatis (G)' },
-          ]).map(({ t, icon, label, tip }) => (
+            { t: 'hand'   as Tool, Icon: Hand,          label: 'Geser',  tip: 'Geser peta (H atau tahan Spasi) — atau seret tombol tengah mouse' },
+            { t: 'select' as Tool, Icon: MousePointer2, label: 'Pilih',  tip: 'Pilih & seret untuk pilih banyak (V)' },
+            { t: 'draw'   as Tool, Icon: Pencil,        label: 'Gambar', tip: 'Gambar unit (R)' },
+            { t: 'grid'   as Tool, Icon: Grid3x3,       label: 'Grid',   tip: 'Grid blok otomatis (G)' },
+          ]).map(({ t, Icon, label, tip }) => (
             <button key={t} onClick={() => setTool(t)} title={tip}
-              className="w-14 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
+              className="w-14 flex flex-col items-center gap-1 py-1.5 rounded-lg transition-all"
               style={{
                 background: tool === t ? 'var(--accent-sub)' : 'transparent',
                 border: tool === t ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
                 color: tool === t ? 'var(--accent-2)' : 'var(--t3)',
               }}>
-              <span className="text-[16px] leading-none">{icon}</span>
+              <Icon size={18} />
               <span className="text-[9px] font-medium leading-none">{label}</span>
             </button>
           ))}
@@ -621,7 +658,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               border: snapEnabled ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
               color: snapEnabled ? 'var(--accent-2)' : 'var(--t3)',
             }}>
-            <span className="text-[16px] leading-none">⊹</span>
+            <Magnet size={16} />
             <span className="text-[9px] font-medium leading-none">Snap</span>
           </button>
 
@@ -635,7 +672,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               color: countSellableUnits(units) === 0 ? 'var(--t3)' : 'var(--accent-2)',
               opacity: tidying || countSellableUnits(units) === 0 ? 0.4 : 1,
             }}>
-            <span className="text-[16px] leading-none">{tidying ? '⏳' : '✨'}</span>
+            {tidying ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
             <span className="text-[9px] font-medium leading-none">Rapikan</span>
           </button>
 
