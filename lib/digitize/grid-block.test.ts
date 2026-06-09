@@ -29,9 +29,10 @@ describe('materializeGrid', () => {
     expect(new Set(units.map(u => u.id)).size).toBe(6)
   })
 
-  test('numbers cells via the deterministic engine (replace rules)', () => {
+  test('numbers cells via the deterministic engine (local replace rules)', () => {
     const units = materializeGrid(grid({
       rows: 1, cols: 6,
+      useGlobalRules: false,
       skipRules: [
         { target: 4, action: 'replace', value: '3A' },
         { target: 5, action: 'replace', value: '3B' },
@@ -39,6 +40,30 @@ describe('materializeGrid', () => {
     }))
     expect(units.map(u => u.unit_code))
       .toEqual(['A-01', 'A-02', 'A-03', 'A-3A', 'A-3B', 'A-06'])
+  })
+
+  test('applies GLOBAL rules by default (useGlobalRules undefined)', () => {
+    const units = materializeGrid(
+      grid({ rows: 1, cols: 4 }),
+      [{ target: 2, action: 'skip' }],
+    )
+    expect(units.map(u => u.unit_code)).toEqual(['A-01', 'A-03', 'A-04', 'A-05'])
+  })
+
+  test('ignores global rules and uses local when useGlobalRules is false', () => {
+    const units = materializeGrid(
+      grid({ rows: 1, cols: 4, useGlobalRules: false, skipRules: [{ target: 3, action: 'skip' }] }),
+      [{ target: 2, action: 'skip' }],
+    )
+    expect(units.map(u => u.unit_code)).toEqual(['A-01', 'A-02', 'A-04', 'A-05'])
+  })
+
+  test('a global block ignores its own stale skipRules', () => {
+    const units = materializeGrid(
+      grid({ rows: 1, cols: 3, useGlobalRules: true, skipRules: [{ target: 2, action: 'skip' }] }),
+      [], // no global rules -> plain sequence, local skipRules ignored
+    )
+    expect(units.map(u => u.unit_code)).toEqual(['A-01', 'A-02', 'A-03'])
   })
 
   test('cells stay within the bounding box', () => {

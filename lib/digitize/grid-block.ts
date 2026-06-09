@@ -27,6 +27,9 @@ export interface GridBlock {
   // Normalized 0-1 bounding box the block occupies on the canvas.
   bbox: { x: number; y: number; width: number; height: number }
   skipRules?: SkipRule[]
+  // When true (the default), the block inherits canvas_data.globalSkipRules
+  // instead of its own skipRules. New + AI-digitized blocks default to true.
+  useGlobalRules?: boolean
   unitType?: UnitType
   // Manually-moved blocks act as fixed anchors when re-tidying (SolverBlock.pinned).
   pinned?: boolean
@@ -84,14 +87,16 @@ export function gridBoundsFromUnits(gridId: string, units: CanvasUnit[]): GridBl
 
 // Expands one grid into its individual lot units. Cells fill the bbox in a
 // uniform rows x cols grid with an even gutter; ids are stable across edits.
-export function materializeGrid(grid: GridBlock): CanvasUnit[] {
+export function materializeGrid(grid: GridBlock, globalRules: SkipRule[] = []): CanvasUnit[] {
   const rows = Math.max(1, Math.floor(grid.rows))
   const cols = Math.max(1, Math.floor(grid.cols))
+  // Global rules apply unless the block opts out (useGlobalRules === false).
+  const rules = grid.useGlobalRules === false ? (grid.skipRules ?? []) : globalRules
   const codes = generateCodes({
     prefix: grid.prefix,
     start: grid.start,
     count: rows * cols,
-    rules: grid.skipRules,
+    rules,
   })
 
   const cellW = grid.bbox.width / cols
@@ -129,6 +134,10 @@ function applyOverride(base: CanvasUnit, override: Partial<CanvasUnit>): CanvasU
 
 // Full canvas output: every grid expanded, then the free (hand-drawn / road)
 // units that aren't owned by any grid. This is what gets saved as canvas_data.units.
-export function materializeCanvas(grids: GridBlock[], freeUnits: CanvasUnit[] = []): CanvasUnit[] {
-  return [...grids.flatMap(materializeGrid), ...freeUnits]
+export function materializeCanvas(
+  grids: GridBlock[],
+  freeUnits: CanvasUnit[] = [],
+  globalRules: SkipRule[] = [],
+): CanvasUnit[] {
+  return [...grids.flatMap(g => materializeGrid(g, globalRules)), ...freeUnits]
 }

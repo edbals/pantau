@@ -6,6 +6,7 @@ import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
 import GridSizePicker from '@/components/map/GridSizePicker'
 import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud'
+import NumberRulesTable from '@/components/map/NumberRulesTable'
 import {
   validateUnitCodes,
   generateGridCodes,
@@ -79,6 +80,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   // Editable grid blocks; their cells live in `units` (materialized output).
   const [grids, setGrids] = useState<GridBlock[]>([])
   const gridsRef = useRef<GridBlock[]>(grids)
+  // Project-wide numbering rules inherited by every block with useGlobalRules.
+  const [globalSkipRules, setGlobalSkipRules] = useState<SkipRule[]>([])
+  const globalRulesRef = useRef<SkipRule[]>(globalSkipRules)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
@@ -139,8 +143,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const selectedGrid = grids.find(g => g.id === selectedGridId) ?? null
   const gridBoxes = useMemo(() => Object.fromEntries(grids.map(g => [g.id, g.bbox])), [grids])
 
-  // Keep gridsRef current so effects/callbacks read the latest without re-binding.
+  // Keep refs current so effects/callbacks read the latest without re-binding.
   useEffect(() => { gridsRef.current = grids }, [grids])
+  useEffect(() => { globalRulesRef.current = globalSkipRules }, [globalSkipRules])
 
   // Re-materialize a grid into `units`, preserving per-cell assignments. One
   // helper for every grid edit (rows/cols/numbering/bbox), so they stay in sync.
@@ -149,8 +154,26 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setGrids(prev => prev.map(g => g.id === next.id ? next : g))
     setUnits(prev => {
       const captured = captureCellOverrides(next, prev)
-      const cells = materializeGrid(captured)
+      const cells = materializeGrid(captured, globalRulesRef.current)
       return [...prev.filter(u => parseGridCellId(u.id)?.gridId !== next.id), ...cells]
+    })
+  }, [])
+
+  // Edit the project-wide rules and instantly re-materialize every block that
+  // inherits them (useGlobalRules !== false).
+  const applyGlobalRules = useCallback((rules: SkipRule[]) => {
+    setIsDirty(true)
+    setGlobalSkipRules(rules)
+    globalRulesRef.current = rules
+    setUnits(prevUnits => {
+      let next = prevUnits
+      for (const g of gridsRef.current) {
+        if (g.useGlobalRules === false) continue
+        const captured = captureCellOverrides(g, next)
+        const cells = materializeGrid(captured, rules)
+        next = [...next.filter(u => parseGridCellId(u.id)?.gridId !== g.id), ...cells]
+      }
+      return next
     })
   }, [])
 
@@ -180,6 +203,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         initialUnitsRef.current = serverUnits
         if (Array.isArray(j.data.canvas_data?.grids)) {
           setGrids(j.data.canvas_data.grids)
+        }
+        if (Array.isArray(j.data.canvas_data?.globalSkipRules)) {
+          setGlobalSkipRules(j.data.canvas_data.globalSkipRules)
         }
         if (Array.isArray(j.data.canvas_data?.skipNumbers)) {
           setSkipNumbers(j.data.canvas_data.skipNumbers)
@@ -311,7 +337,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       targetGrids = tidyGrids(beforeGrids, { imageAspect })
       const free = before.filter(u => !parseGridCellId(u.id))
       target = [
-        ...targetGrids.flatMap(g => materializeGrid(captureCellOverrides(g, before))),
+        ...targetGrids.flatMap(g => materializeGrid(captureCellOverrides(g, before), globalRulesRef.current)),
         ...free,
       ]
     } else {
@@ -384,7 +410,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const res = await fetch(`/api/v1/projects/${id}/map/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ canvas_data: { units, grids, skipNumbers, subs } }),
+      body: JSON.stringify({ canvas_data: { units, grids, globalSkipRules, skipNumbers, subs } }),
     })
     if (res.ok) {
       setIsDirty(false)
@@ -393,7 +419,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [id, units, grids, skipNumbers, subs])
+  }, [id, units, grids, globalSkipRules, skipNumbers, subs])
 
   // Ctrl+S to save
   useEffect(() => {
@@ -441,7 +467,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             },
             cellOverrides: undefined, // fresh clone of structure, not assignments
           }
-          const cells = materializeGrid(grid)
+          const cells = materializeGrid(grid, globalRulesRef.current)
           setIsDirty(true)
           setGrids(prev => [...prev, grid])
           setUnits(prev => [...prev, ...cells])
@@ -554,9 +580,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           start: g.start_number,
           bbox: g.bounding_box,
           skipRules: [],
+          useGlobalRules: true,
           unitType: 'house',
         }))
-        const gridUnits = newGrids.flatMap(materializeGrid)
+        const gridUnits = newGrids.flatMap(g => materializeGrid(g, globalRulesRef.current))
         // Roads / common areas are free (non-grid) units kept alongside the grids.
         const areaUnits: CanvasUnit[] = nonGridAreas.map((a, i) => ({
           id: `area_${stamp}_${i}`,
@@ -619,9 +646,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       prefix, rows, cols, start,
       bbox: gridRect,
       skipRules: skip.map(target => ({ target, action: 'skip' as const })),
+      // Honour modal skips locally; otherwise inherit the project rules.
+      useGlobalRules: skip.length === 0,
       unitType: 'house',
     }
-    const cells = materializeGrid(grid)
+    const cells = materializeGrid(grid, globalRulesRef.current)
 
     // Remember the skips so validation won't flag them as gaps.
     if (skip.length > 0) {
@@ -1119,15 +1148,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               const updateGrid = (patch: Partial<GridBlock>) => commitGrid({ ...g, ...patch })
               const rules = g.skipRules ?? []
               const setRules = (next: SkipRule[]) => updateGrid({ skipRules: next })
-              const addRule = () => {
-                const used = new Set(rules.map(r => r.target))
-                let t = g.start
-                while (used.has(t)) t++
-                setRules([...rules, { target: t, action: 'skip' }])
-              }
+              const usesGlobal = g.useGlobalRules !== false
+              const effectiveRules = usesGlobal ? globalSkipRules : rules
               const total = Math.max(0, g.rows * g.cols)
               const preview = total > 0
-                ? generateCodes({ prefix: g.prefix, start: g.start, count: total, rules })
+                ? generateCodes({ prefix: g.prefix, start: g.start, count: total, rules: effectiveRules })
                 : []
               return (
                 <div className="mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1187,40 +1212,24 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     </div>
                   </div>
 
-                  {/* Custom numbering rules: skip a number or replace its label */}
+                  {/* Numbering: inherit project rules, or define block-local ones */}
                   <div className="mb-1">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-[10px]" style={{ color: 'var(--t3)' }}>Aturan Nomor</label>
-                      <button onClick={addRule}
-                        className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                        style={{ background: 'var(--accent-sub)', color: 'var(--accent-2)' }}>+ Tambah</button>
-                    </div>
-                    {rules.length === 0 && (
-                      <p className="text-[10px]" style={{ color: 'var(--t3)' }}>Tidak ada — semua nomor urut.</p>
+                    <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={usesGlobal}
+                        onChange={e => updateGrid({ useGlobalRules: e.target.checked })}
+                        style={{ accentColor: 'var(--accent)' }} />
+                      <span className="text-[11px] font-medium" style={{ color: usesGlobal ? 'var(--accent-2)' : 'var(--t2)' }}>
+                        Gunakan Aturan Proyek
+                      </span>
+                    </label>
+                    {usesGlobal ? (
+                      <>
+                        <p className="text-[10px] mb-1.5" style={{ color: 'var(--t3)' }}>Mewarisi aturan proyek:</p>
+                        <NumberRulesTable rules={globalSkipRules} readOnly />
+                      </>
+                    ) : (
+                      <NumberRulesTable rules={rules} onChange={setRules} defaultTarget={g.start} />
                     )}
-                    {rules.map((rule, i) => (
-                      <div key={i} className="flex items-center gap-1 mb-1">
-                        <input type="number" min={1} value={rule.target} title="Nomor"
-                          onChange={e => setRules(rules.map((r, idx) => idx === i ? { ...r, target: Math.max(1, parseInt(e.target.value) || 1) } : r))}
-                          className="w-11 px-1 py-1 rounded text-[11px] text-center font-mono outline-none"
-                          style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
-                        <button
-                          onClick={() => setRules(rules.map((r, idx) => idx === i ? { ...r, action: r.action === 'skip' ? 'replace' : 'skip' } : r))}
-                          className="px-2 py-1 rounded text-[10px] font-medium whitespace-nowrap"
-                          style={{ background: 'var(--bg-3)', border: '1px solid var(--border-md)', color: rule.action === 'replace' ? 'var(--accent-2)' : 'var(--t2)' }}>
-                          {rule.action === 'skip' ? 'Lewati' : 'Ganti'}
-                        </button>
-                        {rule.action === 'replace' && (
-                          <input value={rule.value ?? ''} placeholder="cth. 3A"
-                            onChange={e => setRules(rules.map((r, idx) => idx === i ? { ...r, value: e.target.value } : r))}
-                            className="flex-1 w-full px-1.5 py-1 rounded text-[11px] font-mono outline-none"
-                            style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
-                        )}
-                        <button onClick={() => setRules(rules.filter((_, idx) => idx !== i))}
-                          className="px-1.5 py-1 rounded text-[11px] flex-shrink-0"
-                          style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)' }}>×</button>
-                      </div>
-                    ))}
                   </div>
 
                   {preview.length > 0 && (
@@ -1302,11 +1311,21 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               </div>
             )}
 
-            {selectedUnits.length === 0 && (
-              <p className="text-[12px] text-center py-4" style={{ color: 'var(--t3)' }}>
-                Pilih unit di kanvas untuk mengkonfigurasi.<br />
-                <span className="text-[11px]">Seret di area kosong untuk pilih banyak, Shift+klik untuk menambah.</span>
-              </p>
+            {/* Project settings (canvas empty state): edit the global numbering rules */}
+            {selectedIds.length === 0 && (
+              <div>
+                <p className="text-[10px] font-semibold tracking-widest uppercase mb-2" style={{ color: 'var(--accent-2)' }}>
+                  Pengaturan Proyek
+                </p>
+                <p className="text-[11px] mb-3" style={{ color: 'var(--t3)' }}>
+                  Aturan nomor di bawah berlaku untuk semua blok yang memakai “Aturan Proyek”. Atur sekali di sini, tidak perlu per blok.
+                </p>
+                <NumberRulesTable rules={globalSkipRules} onChange={applyGlobalRules} />
+                <p className="text-[11px] text-center mt-5 pt-4" style={{ color: 'var(--t3)', borderTop: '1px solid var(--border)' }}>
+                  Pilih blok di kanvas untuk konfigurasi per-blok.<br />
+                  <span className="text-[10px]">Seret di area kosong untuk pilih banyak, Shift+klik untuk menambah.</span>
+                </p>
+              </div>
             )}
 
             {/* Tab: Tipe */}
