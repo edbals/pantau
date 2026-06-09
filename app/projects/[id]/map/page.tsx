@@ -16,14 +16,15 @@ import {
 } from '@/lib/digitize/numbering'
 import {
   materializeGrid,
+  materializeCanvas,
   captureCellOverrides,
   parseGridCellId,
   type GridBlock,
 } from '@/lib/digitize/grid-block'
-import { tidyLayout, tidyGrids } from '@/lib/digitize/tidy-layout'
 import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
-  Magnet, Sparkles, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
+  Magnet, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
+  Eye, EyeOff, AlignStartHorizontal, AlignStartVertical, AlignHorizontalDistributeCenter,
 } from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
@@ -86,9 +87,8 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
-  // Render-frame aspect (w/h) reported by the canvas; keeps tidied lots square.
-  const [imageAspect, setImageAspect] = useState(1)
-  const [tidying, setTidying] = useState(false)
+  // Opacity of the faded site-plan background, for before/after comparison.
+  const [bgOpacity, setBgOpacity] = useState(0.45)
   // Spacebar-to-pan: while Space is held the canvas behaves as the Hand tool,
   // then reverts to whatever tool was active. toolRef keeps the keydown closure
   // current without re-binding the listener on every tool change.
@@ -142,6 +142,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   }, [selectedIds])
   const selectedGrid = grids.find(g => g.id === selectedGridId) ?? null
   const gridBoxes = useMemo(() => Object.fromEntries(grids.map(g => [g.id, g.bbox])), [grids])
+  // All grid blocks the current selection touches — alignment needs ≥ 2.
+  const selectedGridIds = useMemo(
+    () => [...new Set(selectedIds.map(id => parseGridCellId(id)?.gridId).filter((g): g is string => !!g))],
+    [selectedIds]
+  )
 
   // Keep refs current so effects/callbacks read the latest without re-binding.
   useEffect(() => { gridsRef.current = grids }, [grids])
@@ -198,21 +203,29 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       .then(j => {
         if (!j.data) return
         setProject({ name: j.data.name, project_code: j.data.project_code })
-        const serverUnits: CanvasUnit[] = j.data.canvas_data?.units ?? []
-        setUnits(serverUnits)
-        initialUnitsRef.current = serverUnits
-        if (Array.isArray(j.data.canvas_data?.grids)) {
-          setGrids(j.data.canvas_data.grids)
+        const cd = j.data.canvas_data ?? {}
+        const serverGrids: GridBlock[] = Array.isArray(cd.grids) ? cd.grids : []
+        const globalRules: SkipRule[] = Array.isArray(cd.globalSkipRules) ? cd.globalSkipRules : []
+        setGlobalSkipRules(globalRules)
+        if (Array.isArray(cd.skipNumbers)) setSkipNumbers(cd.skipNumbers)
+        if (Array.isArray(cd.subs)) setSubs(cd.subs)
+
+        // Hydrate from the GridBlock model when present: re-materialize the active
+        // units from grids + freeUnits so block selection + the config panel
+        // survive a reload. Only fall back to legacy flat units when grids is
+        // missing or empty.
+        let activeUnits: CanvasUnit[]
+        if (serverGrids.length > 0) {
+          setGrids(serverGrids)
+          const freeUnits: CanvasUnit[] = Array.isArray(cd.freeUnits)
+            ? cd.freeUnits
+            : (Array.isArray(cd.units) ? cd.units : []).filter((u: CanvasUnit) => !parseGridCellId(u.id))
+          activeUnits = materializeCanvas(serverGrids, freeUnits, globalRules)
+        } else {
+          activeUnits = Array.isArray(cd.units) ? cd.units : []
         }
-        if (Array.isArray(j.data.canvas_data?.globalSkipRules)) {
-          setGlobalSkipRules(j.data.canvas_data.globalSkipRules)
-        }
-        if (Array.isArray(j.data.canvas_data?.skipNumbers)) {
-          setSkipNumbers(j.data.canvas_data.skipNumbers)
-        }
-        if (Array.isArray(j.data.canvas_data?.subs)) {
-          setSubs(j.data.canvas_data.subs)
-        }
+        setUnits(activeUnits)
+        initialUnitsRef.current = activeUnits
 
         try {
           const raw = localStorage.getItem(`pantau_map_${id}`)
@@ -220,7 +233,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             const draft = JSON.parse(raw) as MapDraft
             // Only offer recovery when the draft actually differs from what was
             // just loaded from the server — otherwise it's redundant noise.
-            const differs = JSON.stringify(draft.units ?? []) !== JSON.stringify(serverUnits)
+            const differs = JSON.stringify(draft.units ?? []) !== JSON.stringify(activeUnits)
             const dismissed = sessionStorage.getItem(`pantau_map_dismiss_${id}`) === draft.savedAt
             if (draft.units?.length > 0 && differs && !dismissed) {
               setDraftUnits(draft.units)
@@ -240,10 +253,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const redoStack = useRef<HistEntry[]>([])
   const histBaseline = useRef<HistEntry | null>(null)
   const skipHistory = useRef(false)
-  // True while a tidy-layout tween is running: intermediate frames must not push
-  // history (the whole tween commits as one undo step when it settles).
-  const animating = useRef(false)
-  const tidyRaf = useRef<number | null>(null)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
   const syncHistFlags = () => {
@@ -255,9 +264,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     // grids always change alongside units (every grid edit re-materializes), so
     // watching units catches everything; we snapshot grids from the ref.
     const snap = (): HistEntry => ({ units, grids: gridsRef.current })
-    // During a tidy tween, track the latest frame as baseline but never push —
-    // the tween commits a single history entry itself when it finishes.
-    if (animating.current) { histBaseline.current = snap(); return }
     if (skipHistory.current) { skipHistory.current = false; histBaseline.current = snap(); return }
     if (histBaseline.current === null) { histBaseline.current = snap(); return }
     if (histBaseline.current.units === units) return
@@ -323,84 +329,46 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSelectedIds([])
   }, [selectedIds])
 
-  // ── Tidy layout: re-flow blocks into a clean collision-free schematic ──
-  const runTidyLayout = useCallback(() => {
-    if (tidyRaf.current !== null) return // a tween is already running
-    const before = units
-    const beforeGrids = gridsRef.current
+  // ── Figma-style alignment of the selected grid blocks ──
+  const alignSelectedGrids = useCallback((mode: 'top' | 'left' | 'distribute-h') => {
+    const ids = new Set(
+      selectedIds.map(id => parseGridCellId(id)?.gridId).filter((g): g is string => !!g)
+    )
+    const blocks = gridsRef.current.filter(g => ids.has(g.id))
+    if (blocks.length < 2) return
 
-    // Primary path: solve on the GridBlock entities (bbox centroids), then
-    // re-materialize. Fall back to flat-unit tidy only when there are no grids.
-    let targetGrids = beforeGrids
-    let target: CanvasUnit[]
-    if (beforeGrids.length > 0) {
-      targetGrids = tidyGrids(beforeGrids, { imageAspect })
-      const free = before.filter(u => !parseGridCellId(u.id))
-      target = [
-        ...targetGrids.flatMap(g => materializeGrid(captureCellOverrides(g, before), globalRulesRef.current)),
-        ...free,
-      ]
+    const updates = new Map<string, GridBlock['bbox']>()
+    if (mode === 'top') {
+      const top = Math.min(...blocks.map(b => b.bbox.y))
+      for (const b of blocks) updates.set(b.id, { ...b.bbox, y: top })
+    } else if (mode === 'left') {
+      const left = Math.min(...blocks.map(b => b.bbox.x))
+      for (const b of blocks) updates.set(b.id, { ...b.bbox, x: left })
     } else {
-      target = tidyLayout(before, { imageAspect })
+      // Distribute horizontally: equal gaps across the collective bounds.
+      const sorted = [...blocks].sort((a, b) => a.bbox.x - b.bbox.x)
+      const left = sorted[0].bbox.x
+      const right = Math.max(...sorted.map(b => b.bbox.x + b.bbox.width))
+      const totalW = sorted.reduce((s, b) => s + b.bbox.width, 0)
+      const gap = (right - left - totalW) / (sorted.length - 1)
+      let cursor = left
+      for (const b of sorted) { updates.set(b.id, { ...b.bbox, x: cursor }); cursor += b.bbox.width + gap }
     }
 
-    const moved = target !== before && (target.length !== before.length || target.some((u, i) => {
-      const b = before[i]
-      return !b || b.id !== u.id || b.x !== u.x || b.y !== u.y || b.width !== u.width || b.height !== u.height
-    }))
-    if (!moved) return
-
-    setTidying(true)
-    animating.current = true
-    setSelectedIds([])
-
-    const byId = new Map(before.map(u => [u.id, u]))
-    const DURATION = 320
-    const startedAt = performance.now()
-    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
-
-    const step = (now: number) => {
-      const t = Math.min(1, (now - startedAt) / DURATION)
-      const k = easeOutCubic(t)
-      const frame = target.map(u => {
-        const from = byId.get(u.id)
-        if (!from) return u
-        const lerp = (a: number, b: number) => a + (b - a) * k
-        return {
-          ...u,
-          x: lerp(from.x, u.x),
-          y: lerp(from.y, u.y),
-          width: lerp(from.width, u.width),
-          height: lerp(from.height, u.height),
-          rotation: lerp(from.rotation ?? 0, u.rotation ?? 0),
-        }
-      })
-      setUnits(frame)
-      if (t < 1) {
-        tidyRaf.current = requestAnimationFrame(step)
-        return
+    setIsDirty(true)
+    setGrids(prev => prev.map(g => updates.has(g.id) ? { ...g, bbox: updates.get(g.id)! } : g))
+    setUnits(prev => {
+      let next = prev
+      for (const [id, bbox] of updates) {
+        const g = gridsRef.current.find(x => x.id === id)
+        if (!g) continue
+        const captured = captureCellOverrides({ ...g, bbox }, next)
+        const cells = materializeGrid(captured, globalRulesRef.current)
+        next = [...next.filter(u => parseGridCellId(u.id)?.gridId !== id), ...cells]
       }
-      // Settle: snap to the exact target + the solved grid bboxes; one undo step.
-      tidyRaf.current = null
-      animating.current = false
-      skipHistory.current = true // the commit below must not double-push history
-      setUnits(target)
-      setGrids(targetGrids)
-      undoStack.current.push({ units: before, grids: beforeGrids })
-      if (undoStack.current.length > 50) undoStack.current.shift()
-      redoStack.current = []
-      histBaseline.current = { units: target, grids: targetGrids }
-      setIsDirty(true)
-      setTidying(false)
-      syncHistFlags()
-    }
-    tidyRaf.current = requestAnimationFrame(step)
-  }, [units, imageAspect])
-
-  // Cancel any in-flight tidy tween on unmount.
-  useEffect(() => () => {
-    if (tidyRaf.current !== null) cancelAnimationFrame(tidyRaf.current)
-  }, [])
+      return next
+    })
+  }, [selectedIds])
 
   // Keep the keyboard closure's view of the active tool current.
   useEffect(() => { toolRef.current = tool }, [tool])
@@ -410,7 +378,16 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const res = await fetch(`/api/v1/projects/${id}/map/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ canvas_data: { units, grids, globalSkipRules, skipNumbers, subs } }),
+      body: JSON.stringify({
+        canvas_data: {
+          // units = materialized output (read by the PM viewer); grids + freeUnits
+          // = the editor source of truth, re-hydrated on load.
+          units,
+          grids,
+          freeUnits: units.filter(u => !parseGridCellId(u.id)),
+          globalSkipRules, skipNumbers, subs,
+        },
+      }),
     })
     if (res.ok) {
       setIsDirty(false)
@@ -750,6 +727,23 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           </div>
         )}
 
+        {/* Blueprint transparency — before/after comparison */}
+        {bgImageUrl && (
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
+            style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+            <button onClick={() => setBgOpacity(o => o > 0 ? 0 : 1)}
+              title={bgOpacity > 0 ? 'Sembunyikan denah' : 'Tampilkan denah'}
+              className="flex items-center justify-center"
+              style={{ color: bgOpacity > 0 ? 'var(--t2)' : 'var(--t3)' }}>
+              {bgOpacity > 0 ? <Eye size={15} /> : <EyeOff size={15} />}
+            </button>
+            <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--t3)' }}>Transparansi Denah</span>
+            <input type="range" min={0} max={1} step={0.05} value={bgOpacity}
+              onChange={e => setBgOpacity(Number(e.target.value))}
+              className="w-20" style={{ accentColor: 'var(--accent)' }} />
+          </div>
+        )}
+
         {/* Upload site plan */}
         <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium cursor-pointer"
           style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>
@@ -838,19 +832,29 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             <span className="text-[9px] font-medium leading-none">Snap</span>
           </button>
 
-          {/* Tidy layout — re-flow blocks into a clean, collision-free schematic */}
-          <button onClick={runTidyLayout} disabled={tidying || countSellableUnits(units) === 0}
-            title="Rapikan tata letak — susun ulang blok jadi grid rapi tanpa tumpang tindih"
-            className="w-14 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
-            style={{
-              background: 'transparent',
-              border: '1px solid transparent',
-              color: countSellableUnits(units) === 0 ? 'var(--t3)' : 'var(--accent-2)',
-              opacity: tidying || countSellableUnits(units) === 0 ? 0.4 : 1,
-            }}>
-            {tidying ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            <span className="text-[9px] font-medium leading-none">Rapikan</span>
-          </button>
+          {/* Alignment — operates on 2+ selected grid blocks (Figma-style) */}
+          {(() => {
+            const canAlign = selectedGridIds.length >= 2
+            const actions = [
+              { mode: 'top' as const, Icon: AlignStartHorizontal, tip: 'Ratakan atas' },
+              { mode: 'left' as const, Icon: AlignStartVertical, tip: 'Ratakan kiri' },
+              { mode: 'distribute-h' as const, Icon: AlignHorizontalDistributeCenter, tip: 'Distribusi horizontal' },
+            ]
+            return (
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-[8px] font-medium" style={{ color: 'var(--t3)' }}>Ratakan</span>
+                <div className="flex gap-0.5">
+                  {actions.map(({ mode, Icon, tip }) => (
+                    <button key={mode} onClick={() => alignSelectedGrids(mode)} disabled={!canAlign} title={tip}
+                      className="w-[26px] h-7 flex items-center justify-center rounded-lg transition-all"
+                      style={{ background: 'transparent', color: canAlign ? 'var(--accent-2)' : 'var(--t3)', opacity: canAlign ? 1 : 0.3 }}>
+                      <Icon size={15} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
 
           <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
 
@@ -910,7 +914,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             selectedIds={selectedIds} onSelectionChange={setSelectedIds}
             tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
-            onAspectChange={setImageAspect}
+            bgOpacity={bgOpacity}
             gridBoxes={gridBoxes}
             selectedGridId={selectedGridId}
             onGridResize={handleGridResize}

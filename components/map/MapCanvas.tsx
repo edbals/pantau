@@ -45,6 +45,7 @@ interface Props {
   gridBoxes?: Record<string, GridRect>
   selectedGridId?: string | null
   onGridResize?: (id: string, bbox: GridRect) => void
+  bgOpacity?: number  // opacity of the faded site-plan background (0-1)
 }
 
 // A unit id of the shape `${gridId}__r{r}c{c}` belongs to a grid block.
@@ -120,7 +121,7 @@ function clampToBox(x: number, y: number, w: number, h: number) {
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
   tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect, onAspectChange,
-  gridBoxes, selectedGridId, onGridResize,
+  gridBoxes, selectedGridId, onGridResize, bgOpacity = 0.45,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -144,6 +145,9 @@ export default function MapCanvas({
   // Marquee (rubber-band) rectangle in screen px while drag-selecting.
   const marquee = useRef<{ startX: number; startY: number; additive: boolean } | null>(null)
   const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  // Active smart-snapping guide lines (normalised positions) shown while a grid
+  // block edge snaps flush to a neighbour's edge.
+  const [snapGuides, setSnapGuides] = useState<{ vx: number | null; hy: number | null }>({ vx: null, hy: null })
   // Zoom / pan view transform.
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -299,42 +303,58 @@ export default function MapCanvas({
       // Move or resize a whole grid block; cells re-flow inside on the parent.
       if (gridGesture.current && onGridResize) {
         const g = gridGesture.current
-        const dx = snapPx(x - g.sx) / frame.w
-        const dy = snapPx(y - g.sy) / frame.h
+        // Raw delta — cross-block edge snapping (below) handles alignment.
+        const dx = (x - g.sx) / frame.w
+        const dy = (y - g.sy) / frame.h
+        const h = g.mode
+        const MIN = 0.02
         let nx = g.ox, ny = g.oy, nw = g.ow, nh = g.oh
-        if (g.mode === 'move') {
+        if (h === 'move') {
           nx = g.ox + dx; ny = g.oy + dy
         } else {
-          const h = g.mode
           if (h.includes('e')) nw = g.ow + dx
           if (h.includes('s')) nh = g.oh + dy
           if (h.includes('w')) { nx = g.ox + dx; nw = g.ow - dx }
           if (h.includes('n')) { ny = g.oy + dy; nh = g.oh - dy }
-          const MIN = 0.02
           if (nw < MIN) { if (h.includes('w')) nx = g.ox + g.ow - MIN; nw = MIN }
           if (nh < MIN) { if (h.includes('n')) ny = g.oy + g.oh - MIN; nh = MIN }
+        }
 
-          // Alignment snapping: drag a block's edge near another block's edge to
-          // snap them flush, so heights/columns line up. Alt bypasses.
-          if (snap && !e.altKey && gridBoxes) {
-            const others = Object.entries(gridBoxes).filter(([k]) => k !== g.id).map(([, b]) => b)
-            const yEdges = others.flatMap(b => [b.y, b.y + b.height])
-            const xEdges = others.flatMap(b => [b.x, b.x + b.width])
-            const thrY = 8 / frame.h
-            const thrX = 8 / frame.w
-            const snapTo = (v: number, edges: number[], thr: number) => {
-              let best = v, bestDist = thr
-              for (const edge of edges) { const d = Math.abs(v - edge); if (d < bestDist) { bestDist = d; best = edge } }
-              return best
+        // Smart snapping: snap the active block's edges flush to any NON-selected
+        // block's edge within 5px, and surface a dashed magenta guide. Alt bypasses.
+        let guideVx: number | null = null
+        let guideHy: number | null = null
+        if (snap && !e.altKey && gridBoxes) {
+          const others = Object.entries(gridBoxes).filter(([k]) => k !== g.id).map(([, b]) => b)
+          const xEdges = others.flatMap(b => [b.x, b.x + b.width])
+          const yEdges = others.flatMap(b => [b.y, b.y + b.height])
+          const thrX = 5 / frame.w
+          const thrY = 5 / frame.h
+          const near = (v: number, edges: number[], thr: number): { edge: number; delta: number } | null => {
+            let best: { edge: number; delta: number } | null = null
+            for (const edge of edges) {
+              const delta = v - edge
+              if (Math.abs(delta) < (best ? Math.abs(best.delta) : thr)) best = { edge, delta }
             }
-            if (h.includes('n')) { const bottom = ny + nh; ny = snapTo(ny, yEdges, thrY); nh = bottom - ny }
-            if (h.includes('s')) { nh = snapTo(ny + nh, yEdges, thrY) - ny }
-            if (h.includes('w')) { const right = nx + nw; nx = snapTo(nx, xEdges, thrX); nw = right - nx }
-            if (h.includes('e')) { nw = snapTo(nx + nw, xEdges, thrX) - nx }
+            return best
+          }
+          const closer = (a: { edge: number; delta: number } | null, b: { edge: number; delta: number } | null) =>
+            !b ? a : !a ? b : Math.abs(a.delta) <= Math.abs(b.delta) ? a : b
+          if (h === 'move') {
+            const sx2 = closer(near(nx, xEdges, thrX), near(nx + nw, xEdges, thrX))
+            if (sx2) { nx -= sx2.delta; guideVx = sx2.edge }
+            const sy2 = closer(near(ny, yEdges, thrY), near(ny + nh, yEdges, thrY))
+            if (sy2) { ny -= sy2.delta; guideHy = sy2.edge }
+          } else {
+            if (h.includes('w')) { const s = near(nx, xEdges, thrX); if (s) { const right = nx + nw; nx = s.edge; nw = right - nx; guideVx = s.edge } }
+            if (h.includes('e')) { const s = near(nx + nw, xEdges, thrX); if (s) { nw = s.edge - nx; guideVx = s.edge } }
+            if (h.includes('n')) { const s = near(ny, yEdges, thrY); if (s) { const bottom = ny + nh; ny = s.edge; nh = bottom - ny; guideHy = s.edge } }
+            if (h.includes('s')) { const s = near(ny + nh, yEdges, thrY); if (s) { nh = s.edge - ny; guideHy = s.edge } }
             if (nw < MIN) nw = MIN
             if (nh < MIN) nh = MIN
           }
         }
+        setSnapGuides({ vx: guideVx, hy: guideHy })
         onGridResize(g.id, { x: nx, y: ny, width: nw, height: nh })
         return
       }
@@ -455,7 +475,7 @@ export default function MapCanvas({
 
       dragging.current = null
       resizing.current = null
-      gridGesture.current = null
+      if (gridGesture.current) { gridGesture.current = null; setSnapGuides({ vx: null, hy: null }) }
       painting.current = false
       if (panning.current) { panning.current = null; setIsPanning(false) }
     }
@@ -623,7 +643,7 @@ export default function MapCanvas({
             href={bgImageUrl}
             x={frame.x} y={frame.y}
             width={frame.w} height={frame.h}
-            opacity={0.45}
+            opacity={bgOpacity}
             preserveAspectRatio="xMidYMid meet"
             style={{ pointerEvents: 'none' }}
           />
@@ -792,6 +812,16 @@ export default function MapCanvas({
                 onPointerDown={e => handleGridHandleDown(e, h.k)} />
             ))}
           </g>
+        )}
+
+        {/* Smart-snapping guide lines (magenta) */}
+        {snapGuides.vx !== null && (
+          <line x1={frame.x + snapGuides.vx * frame.w} y1={0} x2={frame.x + snapGuides.vx * frame.w} y2={svgSize.h}
+            stroke="#ff00ff" strokeWidth={1} strokeDasharray="4,3" style={{ pointerEvents: 'none' }} />
+        )}
+        {snapGuides.hy !== null && (
+          <line x1={0} y1={frame.y + snapGuides.hy * frame.h} x2={svgSize.w} y2={frame.y + snapGuides.hy * frame.h}
+            stroke="#ff00ff" strokeWidth={1} strokeDasharray="4,3" style={{ pointerEvents: 'none' }} />
         )}
 
         {/* Draw draft rectangle */}
