@@ -1,5 +1,9 @@
 import { describe, test, expect } from 'vitest'
-import { materializeGrid, materializeCanvas, cellKey, type GridBlock } from './grid-block'
+import {
+  materializeGrid, materializeCanvas, cellKey,
+  parseGridCellId, captureCellOverrides, gridBoundsFromUnits,
+  type GridBlock,
+} from './grid-block'
 import type { CanvasUnit } from '@/components/map/MapCanvas'
 
 function grid(partial: Partial<GridBlock> = {}): GridBlock {
@@ -68,6 +72,51 @@ describe('materializeGrid', () => {
     expect(unit.id).toBe('g1__r0c0')
     expect(unit.unit_code).toBe('A-01')
     expect(unit.x).toBeCloseTo(0.1 + 0.6 * 0.08, 6) // bbox.x + gutter, not 0.99
+  })
+})
+
+describe('parseGridCellId', () => {
+  test('round-trips the stable id scheme', () => {
+    expect(parseGridCellId('g1__r2c3')).toEqual({ gridId: 'g1', row: 2, col: 3 })
+  })
+  test('tolerates ids with __ in the grid id', () => {
+    expect(parseGridCellId('grid_123__abc__r0c1')).toEqual({ gridId: 'grid_123__abc', row: 0, col: 1 })
+  })
+  test('returns null for non-grid ids', () => {
+    expect(parseGridCellId('road1')).toBeNull()
+  })
+})
+
+describe('captureCellOverrides', () => {
+  test('preserves a cell assignment across a re-materialize (more cols)', () => {
+    const g = grid({ rows: 1, cols: 3 })
+    const units = materializeGrid(g).map(u =>
+      u.id === 'g1__r0c1' ? { ...u, subcontractor_color: '#abcdef', urgency: 'high' as const } : u
+    )
+    const captured = captureCellOverrides(g, units)
+    expect(captured.cellOverrides?.[cellKey(0, 1)]).toEqual({ subcontractor_color: '#abcdef', urgency: 'high' })
+
+    // Growing to 4 cols must keep cell (0,1)'s assignment.
+    const grown = materializeGrid({ ...captured, cols: 4 })
+    expect(grown.find(u => u.id === 'g1__r0c1')?.subcontractor_color).toBe('#abcdef')
+  })
+
+  test('does not capture default/empty values', () => {
+    const g = grid({ rows: 1, cols: 2 })
+    const captured = captureCellOverrides(g, materializeGrid(g))
+    expect(captured.cellOverrides ?? {}).toEqual({})
+  })
+})
+
+describe('gridBoundsFromUnits', () => {
+  test('returns the tight box of a grid’s cells', () => {
+    const units = materializeGrid(grid({ rows: 1, cols: 2, bbox: { x: 0.2, y: 0.2, width: 0.4, height: 0.2 } }))
+    const box = gridBoundsFromUnits('g1', units)!
+    expect(box.x).toBeGreaterThanOrEqual(0.2)
+    expect(box.x + box.width).toBeLessThanOrEqual(0.6 + 1e-9)
+  })
+  test('returns null when the grid has no cells', () => {
+    expect(gridBoundsFromUnits('nope', [])).toBeNull()
   })
 })
 

@@ -9,8 +9,17 @@ import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud
 import {
   validateUnitCodes,
   generateGridCodes,
+  generateCodes,
   parseSkipList,
+  type SkipRule,
 } from '@/lib/digitize/numbering'
+import {
+  materializeGrid,
+  captureCellOverrides,
+  parseGridCellId,
+  gridBoundsFromUnits,
+  type GridBlock,
+} from '@/lib/digitize/grid-block'
 import { tidyLayout } from '@/lib/digitize/tidy-layout'
 import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
@@ -23,6 +32,12 @@ interface MapDraft {
   units: CanvasUnit[]
   skipNumbers?: number[]
   savedAt: string
+}
+
+// One undo/redo snapshot: the materialized units and their source grids.
+interface HistEntry {
+  units: CanvasUnit[]
+  grids: GridBlock[]
 }
 
 
@@ -62,6 +77,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
   const [project, setProject] = useState<{ name: string; project_code: string } | null>(null)
   const [units, setUnits] = useState<CanvasUnit[]>([])
+  // Editable grid blocks; their cells live in `units` (materialized output).
+  const [grids, setGrids] = useState<GridBlock[]>([])
+  const gridsRef = useRef<GridBlock[]>(grids)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
@@ -109,6 +127,38 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   // The detail panel only makes sense for exactly one unit.
   const selected = selectedUnits.length === 1 ? selectedUnits[0] : null
 
+  // The single grid block that owns the current selection (if any) — drives the
+  // grid config panel and the on-canvas bbox handles.
+  const selectedGridId = useMemo(() => {
+    const gids = new Set(
+      selectedIds.map(id => parseGridCellId(id)?.gridId).filter((g): g is string => !!g)
+    )
+    return gids.size === 1 ? [...gids][0] : null
+  }, [selectedIds])
+  const selectedGrid = grids.find(g => g.id === selectedGridId) ?? null
+  const gridBoxes = useMemo(() => Object.fromEntries(grids.map(g => [g.id, g.bbox])), [grids])
+
+  // Keep gridsRef current so effects/callbacks read the latest without re-binding.
+  useEffect(() => { gridsRef.current = grids }, [grids])
+
+  // Re-materialize a grid into `units`, preserving per-cell assignments. One
+  // helper for every grid edit (rows/cols/numbering/bbox), so they stay in sync.
+  const commitGrid = useCallback((next: GridBlock) => {
+    setIsDirty(true)
+    setGrids(prev => prev.map(g => g.id === next.id ? next : g))
+    setUnits(prev => {
+      const captured = captureCellOverrides(next, prev)
+      const cells = materializeGrid(captured)
+      return [...prev.filter(u => parseGridCellId(u.id)?.gridId !== next.id), ...cells]
+    })
+  }, [])
+
+  // Live bbox move/resize from the canvas handles.
+  const handleGridResize = useCallback((id: string, bbox: GridBlock['bbox']) => {
+    const g = gridsRef.current.find(x => x.id === id)
+    if (g) commitGrid({ ...g, bbox })
+  }, [commitGrid])
+
   // Returns the value shared by every selected unit for a field, or null if
   // they differ — used to highlight the active option in batch mode.
   function commonValue<T>(getter: (u: CanvasUnit) => T): T | null {
@@ -127,6 +177,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         const serverUnits: CanvasUnit[] = j.data.canvas_data?.units ?? []
         setUnits(serverUnits)
         initialUnitsRef.current = serverUnits
+        if (Array.isArray(j.data.canvas_data?.grids)) {
+          setGrids(j.data.canvas_data.grids)
+        }
         if (Array.isArray(j.data.canvas_data?.skipNumbers)) {
           setSkipNumbers(j.data.canvas_data.skipNumbers)
         }
@@ -155,9 +208,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   }, [id])
 
   // ── Undo / redo (coalesces rapid changes such as drags into one step) ──
-  const undoStack = useRef<CanvasUnit[][]>([])
-  const redoStack = useRef<CanvasUnit[][]>([])
-  const histBaseline = useRef<CanvasUnit[] | null>(null)
+  // Snapshots units AND grids together so grid-structural edits are undoable.
+  const undoStack = useRef<HistEntry[]>([])
+  const redoStack = useRef<HistEntry[]>([])
+  const histBaseline = useRef<HistEntry | null>(null)
   const skipHistory = useRef(false)
   // True while a tidy-layout tween is running: intermediate frames must not push
   // history (the whole tween commits as one undo step when it settles).
@@ -171,18 +225,21 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   }
 
   useEffect(() => {
+    // grids always change alongside units (every grid edit re-materializes), so
+    // watching units catches everything; we snapshot grids from the ref.
+    const snap = (): HistEntry => ({ units, grids: gridsRef.current })
     // During a tidy tween, track the latest frame as baseline but never push —
     // the tween commits a single history entry itself when it finishes.
-    if (animating.current) { histBaseline.current = units; return }
-    if (skipHistory.current) { skipHistory.current = false; histBaseline.current = units; return }
-    if (histBaseline.current === null) { histBaseline.current = units; return }
-    if (histBaseline.current === units) return
+    if (animating.current) { histBaseline.current = snap(); return }
+    if (skipHistory.current) { skipHistory.current = false; histBaseline.current = snap(); return }
+    if (histBaseline.current === null) { histBaseline.current = snap(); return }
+    if (histBaseline.current.units === units) return
     const t = setTimeout(() => {
-      if (histBaseline.current && histBaseline.current !== units) {
+      if (histBaseline.current && histBaseline.current.units !== units) {
         undoStack.current.push(histBaseline.current)
         if (undoStack.current.length > 50) undoStack.current.shift()
         redoStack.current = []
-        histBaseline.current = units
+        histBaseline.current = snap()
         syncHistFlags()
       }
     }, 450)
@@ -191,11 +248,12 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
   const undo = useCallback(() => {
     if (undoStack.current.length === 0) return
-    redoStack.current.push(units)
+    redoStack.current.push({ units, grids: gridsRef.current })
     const prev = undoStack.current.pop()!
     skipHistory.current = true
     histBaseline.current = prev
-    setUnits(prev)
+    setUnits(prev.units)
+    setGrids(prev.grids)
     setSelectedIds([])
     setIsDirty(true)
     syncHistFlags()
@@ -203,11 +261,12 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
   const redo = useCallback(() => {
     if (redoStack.current.length === 0) return
-    undoStack.current.push(units)
+    undoStack.current.push({ units, grids: gridsRef.current })
     const next = redoStack.current.pop()!
     skipHistory.current = true
     histBaseline.current = next
-    setUnits(next)
+    setUnits(next.units)
+    setGrids(next.grids)
     setSelectedIds([])
     setIsDirty(true)
     syncHistFlags()
@@ -220,17 +279,28 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setUnits(prev => prev.map(u => selectedSet.has(u.id) ? { ...u, ...patch } : u))
   }
 
-  function deleteSelected() {
+  const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return
+    // Deleting any cell of a grid removes the whole block (and its source grid).
+    const sel = new Set(selectedIds)
+    const gids = new Set(
+      selectedIds.map(id => parseGridCellId(id)?.gridId).filter((g): g is string => !!g)
+    )
     setIsDirty(true)
-    setUnits(prev => prev.filter(u => !selectedSet.has(u.id)))
+    if (gids.size > 0) setGrids(prev => prev.filter(g => !gids.has(g.id)))
+    setUnits(prev => prev.filter(u => {
+      if (sel.has(u.id)) return false
+      const gid = parseGridCellId(u.id)?.gridId
+      return !(gid && gids.has(gid))
+    }))
     setSelectedIds([])
-  }
+  }, [selectedIds])
 
   // ── Tidy layout: re-flow blocks into a clean collision-free schematic ──
   const runTidyLayout = useCallback(() => {
     if (tidyRaf.current !== null) return // a tween is already running
     const before = units
+    const beforeGrids = gridsRef.current
     const target = tidyLayout(before, { imageAspect })
     const moved = target !== before && target.some((u, i) => {
       const b = before[i]
@@ -268,15 +338,21 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         tidyRaf.current = requestAnimationFrame(step)
         return
       }
-      // Settle: snap to the exact target and commit one history entry.
+      // Settle: snap to the exact target and commit one history entry. Tidy
+      // moved grid cells directly, so resync each grid's bbox to its new cells.
       tidyRaf.current = null
       animating.current = false
       skipHistory.current = true // the commit below must not double-push history
+      const newGrids = beforeGrids.map(g => {
+        const bb = gridBoundsFromUnits(g.id, target)
+        return bb ? { ...g, bbox: bb } : g
+      })
       setUnits(target)
-      undoStack.current.push(before)
+      setGrids(newGrids)
+      undoStack.current.push({ units: before, grids: beforeGrids })
       if (undoStack.current.length > 50) undoStack.current.shift()
       redoStack.current = []
-      histBaseline.current = target
+      histBaseline.current = { units: target, grids: newGrids }
       setIsDirty(true)
       setTidying(false)
       syncHistFlags()
@@ -297,7 +373,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const res = await fetch(`/api/v1/projects/${id}/map/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ canvas_data: { units, skipNumbers, subs } }),
+      body: JSON.stringify({ canvas_data: { units, grids, skipNumbers, subs } }),
     })
     if (res.ok) {
       setIsDirty(false)
@@ -306,7 +382,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [id, units, skipNumbers, subs])
+  }, [id, units, grids, skipNumbers, subs])
 
   // Ctrl+S to save
   useEffect(() => {
@@ -337,9 +413,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       if (e.key === 'g') setTool('grid')
       if (e.key === 'Escape') setSelectedIds([])
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
-        setIsDirty(true)
-        setUnits(prev => prev.filter(u => !selectedIds.includes(u.id)))
-        setSelectedIds([])
+        deleteSelected()
       }
     }
     function onKeyUp(e: KeyboardEvent) {
@@ -354,7 +428,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [save, selectedIds, undo, redo])
+  }, [save, selectedIds, undo, redo, deleteSelected])
 
   // Autosave to localStorage — fires 1.5 s after any user-initiated change
   useEffect(() => {
@@ -455,35 +529,24 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     const prefix = gridPrefix.trim() || 'U'
     const skip = parseSkipList(gridSkip)
 
-    const unitW = gridRect.width / cols
-    const unitH = gridRect.height / rows
-    // Generate codes up front so skipped numbers (e.g. 4, 13, 14) are honoured.
-    const codes = generateGridCodes({ prefix, start, count: rows * cols, skip })
-    const stamp = Date.now()
-    const newUnits: CanvasUnit[] = []
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const idx = r * cols + c
-        newUnits.push({
-          id: `grid_${stamp}_${r}_${c}`,
-          unit_code: codes[idx],
-          unit_type: 'house',
-          x: gridRect.x + c * unitW,
-          y: gridRect.y + r * unitH,
-          width: unitW,
-          height: unitH,
-          rotation: 0,
-        })
-      }
+    // Create an editable GridBlock; its cells are materialized into `units`.
+    const grid: GridBlock = {
+      id: `grid_${Date.now()}`,
+      prefix, rows, cols, start,
+      bbox: gridRect,
+      skipRules: skip.map(target => ({ target, action: 'skip' as const })),
+      unitType: 'house',
     }
+    const cells = materializeGrid(grid)
 
     // Remember the skips so validation won't flag them as gaps.
     if (skip.length > 0) {
       setSkipNumbers(prev => [...new Set([...prev, ...skip])].sort((a, b) => a - b))
     }
     setIsDirty(true)
-    setUnits(prev => [...prev, ...newUnits])
+    setGrids(prev => [...prev, grid])
+    setUnits(prev => [...prev, ...cells])
+    setSelectedIds(cells.map(c => c.id)) // select the new block
     setGridRect(null)
     setTool('select')
   }
@@ -735,6 +798,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
             onAspectChange={setImageAspect}
+            gridBoxes={gridBoxes}
+            selectedGridId={selectedGridId}
+            onGridResize={handleGridResize}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
 
@@ -943,6 +1009,128 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           </div>
 
           <div className="flex-1 overflow-y-auto p-4">
+
+            {/* Grid block config — live rows/cols + custom numbering rules */}
+            {selectedGrid && (() => {
+              const g = selectedGrid
+              const updateGrid = (patch: Partial<GridBlock>) => commitGrid({ ...g, ...patch })
+              const rules = g.skipRules ?? []
+              const setRules = (next: SkipRule[]) => updateGrid({ skipRules: next })
+              const addRule = () => {
+                const used = new Set(rules.map(r => r.target))
+                let t = g.start
+                while (used.has(t)) t++
+                setRules([...rules, { target: t, action: 'skip' }])
+              }
+              const total = Math.max(0, g.rows * g.cols)
+              const preview = total > 0
+                ? generateCodes({ prefix: g.prefix, start: g.start, count: total, rules })
+                : []
+              return (
+                <div className="mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: 'var(--accent-2)' }}>
+                      Blok Grid
+                    </p>
+                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded"
+                      style={{ background: 'var(--bg-3)', color: 'var(--t2)' }}>{g.prefix || '—'}</span>
+                  </div>
+
+                  {/* Rows / Cols */}
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Baris</label>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => updateGrid({ rows: Math.max(1, g.rows - 1) })}
+                          className="px-2 py-1 rounded text-sm font-bold" style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>−</button>
+                        <input type="number" min={1} value={g.rows}
+                          onChange={e => updateGrid({ rows: Math.max(1, parseInt(e.target.value) || 1) })}
+                          className="flex-1 w-full px-1 py-1 rounded text-[12px] text-center font-mono outline-none"
+                          style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                        <button onClick={() => updateGrid({ rows: g.rows + 1 })}
+                          className="px-2 py-1 rounded text-sm font-bold" style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>+</button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Kolom</label>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => updateGrid({ cols: Math.max(1, g.cols - 1) })}
+                          className="px-2 py-1 rounded text-sm font-bold" style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>−</button>
+                        <input type="number" min={1} value={g.cols}
+                          onChange={e => updateGrid({ cols: Math.max(1, parseInt(e.target.value) || 1) })}
+                          className="flex-1 w-full px-1 py-1 rounded text-[12px] text-center font-mono outline-none"
+                          style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                        <button onClick={() => updateGrid({ cols: g.cols + 1 })}
+                          className="px-2 py-1 rounded text-sm font-bold" style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>+</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Prefix / Start */}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Prefiks</label>
+                      <input value={g.prefix} maxLength={5}
+                        onChange={e => updateGrid({ prefix: e.target.value.toUpperCase() })}
+                        className="w-full px-2 py-1 rounded text-[12px] text-center font-mono outline-none"
+                        style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Mulai</label>
+                      <input type="number" min={1} value={g.start}
+                        onChange={e => updateGrid({ start: Math.max(1, parseInt(e.target.value) || 1) })}
+                        className="w-full px-2 py-1 rounded text-[12px] text-center font-mono outline-none"
+                        style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                    </div>
+                  </div>
+
+                  {/* Custom numbering rules: skip a number or replace its label */}
+                  <div className="mb-1">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px]" style={{ color: 'var(--t3)' }}>Aturan Nomor</label>
+                      <button onClick={addRule}
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                        style={{ background: 'var(--accent-sub)', color: 'var(--accent-2)' }}>+ Tambah</button>
+                    </div>
+                    {rules.length === 0 && (
+                      <p className="text-[10px]" style={{ color: 'var(--t3)' }}>Tidak ada — semua nomor urut.</p>
+                    )}
+                    {rules.map((rule, i) => (
+                      <div key={i} className="flex items-center gap-1 mb-1">
+                        <input type="number" min={1} value={rule.target} title="Nomor"
+                          onChange={e => setRules(rules.map((r, idx) => idx === i ? { ...r, target: Math.max(1, parseInt(e.target.value) || 1) } : r))}
+                          className="w-11 px-1 py-1 rounded text-[11px] text-center font-mono outline-none"
+                          style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                        <button
+                          onClick={() => setRules(rules.map((r, idx) => idx === i ? { ...r, action: r.action === 'skip' ? 'replace' : 'skip' } : r))}
+                          className="px-2 py-1 rounded text-[10px] font-medium whitespace-nowrap"
+                          style={{ background: 'var(--bg-3)', border: '1px solid var(--border-md)', color: rule.action === 'replace' ? 'var(--accent-2)' : 'var(--t2)' }}>
+                          {rule.action === 'skip' ? 'Lewati' : 'Ganti'}
+                        </button>
+                        {rule.action === 'replace' && (
+                          <input value={rule.value ?? ''} placeholder="cth. 3A"
+                            onChange={e => setRules(rules.map((r, idx) => idx === i ? { ...r, value: e.target.value } : r))}
+                            className="flex-1 w-full px-1.5 py-1 rounded text-[11px] font-mono outline-none"
+                            style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                        )}
+                        <button onClick={() => setRules(rules.filter((_, idx) => idx !== i))}
+                          className="px-1.5 py-1 rounded text-[11px] flex-shrink-0"
+                          style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)' }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {preview.length > 0 && (
+                    <p className="text-[10px] text-center mt-2" style={{ color: 'var(--accent-2)' }}>
+                      → {preview.length} unit: {preview[0]} … {preview[preview.length - 1]}
+                    </p>
+                  )}
+                  <p className="text-[9px] text-center mt-1.5" style={{ color: 'var(--t3)' }}>
+                    Seret pegangan di kanvas untuk ubah ukuran blok
+                  </p>
+                </div>
+              )
+            })()}
 
             {/* Selected unit info */}
             {selected && (

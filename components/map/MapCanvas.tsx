@@ -41,6 +41,16 @@ interface Props {
   showProgress?: boolean
   onGridRect?: (rect: GridRect) => void  // fired when grid tool finishes drawing
   onAspectChange?: (aspect: number) => void  // render frame aspect (w/h), for the tidy-layout solver
+  // GridBlock editing: bbox per grid id, the selected grid, and a live resize/move callback.
+  gridBoxes?: Record<string, GridRect>
+  selectedGridId?: string | null
+  onGridResize?: (id: string, bbox: GridRect) => void
+}
+
+// A unit id of the shape `${gridId}__r{r}c{c}` belongs to a grid block.
+function gridIdOfCell(id: string): string | null {
+  const m = id.match(/^(.+)__r\d+c\d+$/)
+  return m ? m[1] : null
 }
 
 // Blueprint / CAD palette — thin cool-toned hairlines on navy, light fills.
@@ -60,6 +70,18 @@ const TYPE_STYLE: Record<UnitType, { stroke: string; fill: string; dash?: string
 }
 
 const GRID_PX = 22  // dot-grid spacing & snap step (screen px)
+
+// 8 bbox handles (corners + edge midpoints) as fractional anchors of the box.
+const GRID_HANDLE_ANCHORS: { k: ResizeHandle; ax: number; ay: number; cursor: string }[] = [
+  { k: 'nw', ax: 0,   ay: 0,   cursor: 'nwse-resize' },
+  { k: 'n',  ax: 0.5, ay: 0,   cursor: 'ns-resize' },
+  { k: 'ne', ax: 1,   ay: 0,   cursor: 'nesw-resize' },
+  { k: 'e',  ax: 1,   ay: 0.5, cursor: 'ew-resize' },
+  { k: 'se', ax: 1,   ay: 1,   cursor: 'nwse-resize' },
+  { k: 's',  ax: 0.5, ay: 1,   cursor: 'ns-resize' },
+  { k: 'sw', ax: 0,   ay: 1,   cursor: 'nesw-resize' },
+  { k: 'w',  ax: 0,   ay: 0.5, cursor: 'ew-resize' },
+]
 
 function progressColor(pct: number) {
   if (pct === 0) return 'transparent'
@@ -98,6 +120,7 @@ function clampToBox(x: number, y: number, w: number, h: number) {
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
   tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect, onAspectChange,
+  gridBoxes, selectedGridId, onGridResize,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -109,6 +132,11 @@ export default function MapCanvas({
   } | null>(null)
   const resizing = useRef<{
     id: string; handle: ResizeHandle
+    ox: number; oy: number; ow: number; oh: number; sx: number; sy: number
+  } | null>(null)
+  // Active grid-block gesture: moving the whole block or dragging a bbox handle.
+  const gridGesture = useRef<{
+    id: string; mode: 'move' | ResizeHandle
     ox: number; oy: number; ow: number; oh: number; sx: number; sy: number
   } | null>(null)
   // True while the paint brush is held down (drag to paint many units).
@@ -145,6 +173,10 @@ export default function MapCanvas({
     () => ({ x: baseFrame.x * zoom + pan.x, y: baseFrame.y * zoom + pan.y, w: baseFrame.w * zoom, h: baseFrame.h * zoom }),
     [baseFrame, zoom, pan]
   )
+
+  // The selected grid's bbox (if any), bound to a value so render-phase JSX never
+  // reaches into props/refs repeatedly.
+  const selectedGridBox = selectedGridId && gridBoxes ? gridBoxes[selectedGridId] ?? null : null
 
   // Always-current view, so the (passive-safe) wheel listener avoids stale state.
   const viewRef = useRef({ zoom, pan })
@@ -239,7 +271,7 @@ export default function MapCanvas({
   // the cursor briefly leaves the SVG mid-stroke
   useEffect(() => {
     function onMove(e: PointerEvent) {
-      if (!drawing.current && !dragging.current && !resizing.current && !marquee.current && !panning.current) return
+      if (!drawing.current && !dragging.current && !resizing.current && !marquee.current && !panning.current && !gridGesture.current) return
       const svg = svgRef.current
       if (!svg) return
       const rect = svg.getBoundingClientRect()
@@ -263,6 +295,28 @@ export default function MapCanvas({
 
       // Snap a screen-pixel delta to the grid (off when snap disabled or Alt held).
       const snapPx = (v: number) => (!snap || e.altKey) ? v : Math.round(v / GRID_PX) * GRID_PX
+
+      // Move or resize a whole grid block; cells re-flow inside on the parent.
+      if (gridGesture.current && onGridResize) {
+        const g = gridGesture.current
+        const dx = snapPx(x - g.sx) / frame.w
+        const dy = snapPx(y - g.sy) / frame.h
+        let nx = g.ox, ny = g.oy, nw = g.ow, nh = g.oh
+        if (g.mode === 'move') {
+          nx = g.ox + dx; ny = g.oy + dy
+        } else {
+          const h = g.mode
+          if (h.includes('e')) nw = g.ow + dx
+          if (h.includes('s')) nh = g.oh + dy
+          if (h.includes('w')) { nx = g.ox + dx; nw = g.ow - dx }
+          if (h.includes('n')) { ny = g.oy + dy; nh = g.oh - dy }
+          const MIN = 0.02
+          if (nw < MIN) { if (h.includes('w')) nx = g.ox + g.ow - MIN; nw = MIN }
+          if (nh < MIN) { if (h.includes('n')) ny = g.oy + g.oh - MIN; nh = MIN }
+        }
+        onGridResize(g.id, { x: nx, y: ny, width: nw, height: nh })
+        return
+      }
 
       if (resizing.current) {
         const { id, handle, ox, oy, ow, oh, sx, sy } = resizing.current
@@ -380,6 +434,7 @@ export default function MapCanvas({
 
       dragging.current = null
       resizing.current = null
+      gridGesture.current = null
       painting.current = false
       if (panning.current) { panning.current = null; setIsPanning(false) }
     }
@@ -390,7 +445,7 @@ export default function MapCanvas({
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, snap, onGridRect]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, snap, onGridRect, onGridResize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function svgCoords(e: React.PointerEvent) {
     const svg = svgRef.current!
@@ -451,6 +506,19 @@ export default function MapCanvas({
     e.stopPropagation()
     if (e.button !== 0) return
 
+    // Cells owned by a grid block aren't individually movable/resizable — the
+    // block owns their geometry. Clicking selects the block; dragging moves it.
+    const cellGridId = gridIdOfCell(id)
+    if (cellGridId && gridBoxes?.[cellGridId]) {
+      emitSelection([id])
+      if (tool === 'select') {
+        const b = gridBoxes[cellGridId]
+        const { x, y } = svgCoords(e)
+        gridGesture.current = { id: cellGridId, mode: 'move', ox: b.x, oy: b.y, ow: b.width, oh: b.height, sx: x, sy: y }
+      }
+      return
+    }
+
     if (tool === 'delete') {
       onChange(units.filter(u => u.id !== id))
       emitSelection(selection.filter(s => s !== id))
@@ -489,6 +557,16 @@ export default function MapCanvas({
     if (!u) return
     const { x, y } = svgCoords(e)
     resizing.current = { id, handle, ox: u.x, oy: u.y, ow: u.width, oh: u.height, sx: x, sy: y }
+  }
+
+  // Start dragging one of the selected grid block's 8 bbox handles.
+  function handleGridHandleDown(e: React.PointerEvent, handle: ResizeHandle) {
+    if (readOnly || e.button !== 0 || !selectedGridId) return
+    const b = gridBoxes?.[selectedGridId]
+    if (!b) return
+    e.stopPropagation()
+    const { x, y } = svgCoords(e)
+    gridGesture.current = { id: selectedGridId, mode: handle, ox: b.x, oy: b.y, ow: b.width, oh: b.height, sx: x, sy: y }
   }
 
   return (
@@ -608,7 +686,7 @@ export default function MapCanvas({
 
               {/* Resize handles — 4 corners + 4 edge midpoints. Only when a
                   single unit is selected; drag to resize width/height. */}
-              {isSelected && !readOnly && tool === 'select' && selection.length === 1 && (
+              {isSelected && !readOnly && tool === 'select' && selection.length === 1 && !gridIdOfCell(u.id) && (
                 <>
                   {([
                     { k: 'nw', hx: px,          hy: py,          cursor: 'nwse-resize' },
@@ -672,6 +750,28 @@ export default function MapCanvas({
             </g>
           )
         })}
+
+        {/* Selected grid block — dashed outline + 8 bbox handles to squash/stretch */}
+        {!readOnly && selectedGridBox && (
+          <g>
+            <rect
+              x={frame.x + selectedGridBox.x * frame.w}
+              y={frame.y + selectedGridBox.y * frame.h}
+              width={selectedGridBox.width * frame.w}
+              height={selectedGridBox.height * frame.h}
+              fill="none" stroke="#A78BFA" strokeWidth={1.5} strokeDasharray="6,3"
+              style={{ pointerEvents: 'none' }} />
+            {GRID_HANDLE_ANCHORS.map(h => (
+              <rect key={h.k}
+                x={frame.x + (selectedGridBox.x + h.ax * selectedGridBox.width) * frame.w - 5}
+                y={frame.y + (selectedGridBox.y + h.ay * selectedGridBox.height) * frame.h - 5}
+                width={10} height={10}
+                fill="#7C3AED" stroke="#fff" strokeWidth={1.5} rx={2}
+                style={{ cursor: h.cursor }}
+                onPointerDown={e => handleGridHandleDown(e, h.k)} />
+            ))}
+          </g>
+        )}
 
         {/* Draw draft rectangle */}
         {draft && draft.w > 2 && draft.h > 2 && (
