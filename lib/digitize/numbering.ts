@@ -18,6 +18,17 @@ export interface ParsedCode {
 
 const MAX_GAP_ISSUES = 5
 
+// How a flagged number is handled when generating codes:
+// - 'skip':   the numeral is omitted entirely and no cell consumes it; the
+//             sequence renumbers past it (e.g. ...3, 5, 6 — classic tetraphobia).
+// - 'suffix': the cell is KEPT but relabelled as the previous good number plus a
+//             sequential letter (e.g. 4,5 -> 3A, 3B). Lot count is preserved and
+//             the unlucky digit never appears.
+export interface SkipRule {
+  number: number
+  mode: 'skip' | 'suffix'
+}
+
 // Parses "3J-03a" / "3J-3B" / "A-12" into parts. Returns null if it doesn't
 // fit the "<prefix>-<number><optional letter>" shape.
 export function parseUnitCode(code: string): ParsedCode | null {
@@ -26,8 +37,48 @@ export function parseUnitCode(code: string): ParsedCode | null {
   return { prefix: match[1], number: parseInt(match[2], 10), suffix: match[3].toLowerCase() }
 }
 
-// Generates `count` sequential codes starting at `start`, skipping any number
-// in `skip`. Format: PREFIX-NN (zero-padded to at least 2 digits).
+// Deterministic numbering engine: generates exactly `count` codes for `count`
+// physical cells, honouring per-number skip/suffix rules. The unit_code array is
+// derived purely from these inputs — never from the AI's OCR of suffixes.
+// Format: PREFIX-NN (zero-padded to at least 2 digits), with an optional letter.
+export function generateCodes(opts: {
+  prefix: string
+  start: number
+  count: number
+  rules?: Iterable<SkipRule>
+  pad?: number
+}): string[] {
+  const { prefix, start, count, pad = 2 } = opts
+  const ruleByNumber = new Map<number, SkipRule['mode']>()
+  for (const r of opts.rules ?? []) ruleByNumber.set(r.number, r.mode)
+
+  const codes: string[] = []
+  let n = start
+  let lastBase = start // fallback base if a suffix appears before any normal number
+  let letterIndex = 0
+  let guard = 0
+  const maxGuard = count + ruleByNumber.size + 10000
+
+  while (codes.length < count && guard < maxGuard) {
+    guard++
+    const mode = ruleByNumber.get(n)
+    if (mode === 'skip') { n++; continue }
+    if (mode === 'suffix') {
+      const letter = String.fromCharCode(65 + letterIndex) // A, B, C…
+      codes.push(`${prefix}-${String(lastBase).padStart(pad, '0')}${letter}`)
+      letterIndex++
+      n++
+      continue
+    }
+    codes.push(`${prefix}-${String(n).padStart(pad, '0')}`)
+    lastBase = n
+    letterIndex = 0
+    n++
+  }
+  return codes
+}
+
+// Back-compat wrapper: a plain skip-list maps to all-'skip' rules.
 export function generateGridCodes(opts: {
   prefix: string
   start: number
@@ -35,18 +86,8 @@ export function generateGridCodes(opts: {
   skip?: Iterable<number>
   pad?: number
 }): string[] {
-  const { prefix, start, count, pad = 2 } = opts
-  const skip = new Set(opts.skip ?? [])
-  const codes: string[] = []
-  let n = start
-  let guard = 0
-  while (codes.length < count && guard < count + skip.size + 10000) {
-    guard++
-    if (skip.has(n)) { n++; continue }
-    codes.push(`${prefix}-${String(n).padStart(pad, '0')}`)
-    n++
-  }
-  return codes
+  const rules: SkipRule[] = [...new Set(opts.skip ?? [])].map(number => ({ number, mode: 'skip' }))
+  return generateCodes({ prefix: opts.prefix, start: opts.start, count: opts.count, rules, pad: opts.pad })
 }
 
 // Validates a set of unit codes. `skip` lists numbers intentionally omitted
