@@ -39,6 +39,7 @@ interface Props {
   readOnly?: boolean
   showProgress?: boolean
   onGridRect?: (rect: GridRect) => void  // fired when grid tool finishes drawing
+  onAspectChange?: (aspect: number) => void  // render frame aspect (w/h), for the tidy-layout solver
 }
 
 // Blueprint / CAD palette — thin cool-toned hairlines on navy, light fills.
@@ -95,7 +96,7 @@ function clampToBox(x: number, y: number, w: number, h: number) {
 
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
-  tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect,
+  tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect, onAspectChange,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -162,7 +163,38 @@ export default function MapCanvas({
     setPan({ x: sx - px * z, y: sy - py * z })
   }
   const zoomBy = (factor: number) => zoomToPoint(viewRef.current.zoom * factor, svgSize.w / 2, svgSize.h / 2)
-  const fitView = () => { setZoom(1); setPan({ x: 0, y: 0 }) }
+
+  // Fit-to-content: frame the bounding box of all units (with a margin) rather
+  // than the background image — once a schematic/tidy layout no longer matches
+  // the scan, framing the image extent would leave the content off-centre.
+  const fitView = () => {
+    const margin = 0.08
+    if (units.length === 0) { setZoom(1); setPan({ x: 0, y: 0 }); return }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const u of units) {
+      minX = Math.min(minX, u.x); minY = Math.min(minY, u.y)
+      maxX = Math.max(maxX, u.x + u.width); maxY = Math.max(maxY, u.y + u.height)
+    }
+    const bw = (maxX - minX) || 1
+    const bh = (maxY - minY) || 1
+    const z = clampZoom(Math.min(
+      (svgSize.w * (1 - 2 * margin)) / (bw * baseFrame.w),
+      (svgSize.h * (1 - 2 * margin)) / (bh * baseFrame.h),
+    ))
+    const cx = minX + bw / 2
+    const cy = minY + bh / 2
+    setZoom(z)
+    setPan({
+      x: svgSize.w / 2 - (baseFrame.x + cx * baseFrame.w) * z,
+      y: svgSize.h / 2 - (baseFrame.y + cy * baseFrame.h) * z,
+    })
+  }
+
+  // Report the render-frame aspect (w/h) so the parent's tidy-layout solver can
+  // make lots square ON SCREEN, not just in normalised space.
+  useEffect(() => {
+    if (baseFrame.h > 0) onAspectChange?.(baseFrame.w / baseFrame.h)
+  }, [baseFrame, onAspectChange])
 
   // Wheel zoom (attached non-passive so we can prevent page scroll).
   useEffect(() => {

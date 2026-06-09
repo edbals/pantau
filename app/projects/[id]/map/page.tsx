@@ -11,6 +11,7 @@ import {
   generateGridCodes,
   parseSkipList,
 } from '@/lib/digitize/numbering'
+import { tidyLayout } from '@/lib/digitize/tidy-layout'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
 
@@ -60,6 +61,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
+  // Render-frame aspect (w/h) reported by the canvas; keeps tidied lots square.
+  const [imageAspect, setImageAspect] = useState(1)
+  const [tidying, setTidying] = useState(false)
   const [configTab, setConfigTab] = useState<ConfigTab>('type')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -146,6 +150,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const redoStack = useRef<CanvasUnit[][]>([])
   const histBaseline = useRef<CanvasUnit[] | null>(null)
   const skipHistory = useRef(false)
+  // True while a tidy-layout tween is running: intermediate frames must not push
+  // history (the whole tween commits as one undo step when it settles).
+  const animating = useRef(false)
+  const tidyRaf = useRef<number | null>(null)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
   const syncHistFlags = () => {
@@ -154,6 +162,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   }
 
   useEffect(() => {
+    // During a tidy tween, track the latest frame as baseline but never push —
+    // the tween commits a single history entry itself when it finishes.
+    if (animating.current) { histBaseline.current = units; return }
     if (skipHistory.current) { skipHistory.current = false; histBaseline.current = units; return }
     if (histBaseline.current === null) { histBaseline.current = units; return }
     if (histBaseline.current === units) return
@@ -206,6 +217,68 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setUnits(prev => prev.filter(u => !selectedSet.has(u.id)))
     setSelectedIds([])
   }
+
+  // ── Tidy layout: re-flow blocks into a clean collision-free schematic ──
+  const runTidyLayout = useCallback(() => {
+    if (tidyRaf.current !== null) return // a tween is already running
+    const before = units
+    const target = tidyLayout(before, { imageAspect })
+    const moved = target !== before && target.some((u, i) => {
+      const b = before[i]
+      return !b || b.x !== u.x || b.y !== u.y || b.width !== u.width || b.height !== u.height
+    })
+    if (!moved) return
+
+    setTidying(true)
+    animating.current = true
+    setSelectedIds([])
+
+    const byId = new Map(before.map(u => [u.id, u]))
+    const DURATION = 320
+    const startedAt = performance.now()
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
+
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startedAt) / DURATION)
+      const k = easeOutCubic(t)
+      const frame = target.map(u => {
+        const from = byId.get(u.id)
+        if (!from) return u
+        const lerp = (a: number, b: number) => a + (b - a) * k
+        return {
+          ...u,
+          x: lerp(from.x, u.x),
+          y: lerp(from.y, u.y),
+          width: lerp(from.width, u.width),
+          height: lerp(from.height, u.height),
+          rotation: lerp(from.rotation ?? 0, u.rotation ?? 0),
+        }
+      })
+      setUnits(frame)
+      if (t < 1) {
+        tidyRaf.current = requestAnimationFrame(step)
+        return
+      }
+      // Settle: snap to the exact target and commit one history entry.
+      tidyRaf.current = null
+      animating.current = false
+      skipHistory.current = true // the commit below must not double-push history
+      setUnits(target)
+      undoStack.current.push(before)
+      if (undoStack.current.length > 50) undoStack.current.shift()
+      redoStack.current = []
+      histBaseline.current = target
+      setIsDirty(true)
+      setTidying(false)
+      syncHistFlags()
+    }
+    tidyRaf.current = requestAnimationFrame(step)
+  }, [units, imageAspect])
+
+  // Cancel any in-flight tidy tween on unmount.
+  useEffect(() => () => {
+    if (tidyRaf.current !== null) cancelAnimationFrame(tidyRaf.current)
+  }, [])
 
   const save = useCallback(async () => {
     setSaving(true)
@@ -552,6 +625,20 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             <span className="text-[9px] font-medium leading-none">Snap</span>
           </button>
 
+          {/* Tidy layout — re-flow blocks into a clean, collision-free schematic */}
+          <button onClick={runTidyLayout} disabled={tidying || countSellableUnits(units) === 0}
+            title="Rapikan tata letak — susun ulang blok jadi grid rapi tanpa tumpang tindih"
+            className="w-14 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
+            style={{
+              background: 'transparent',
+              border: '1px solid transparent',
+              color: countSellableUnits(units) === 0 ? 'var(--t3)' : 'var(--accent-2)',
+              opacity: tidying || countSellableUnits(units) === 0 ? 0.4 : 1,
+            }}>
+            <span className="text-[16px] leading-none">{tidying ? '⏳' : '✨'}</span>
+            <span className="text-[9px] font-medium leading-none">Rapikan</span>
+          </button>
+
           <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
 
           <div className="text-center px-1">
@@ -610,6 +697,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             selectedIds={selectedIds} onSelectionChange={setSelectedIds}
             tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
+            onAspectChange={setImageAspect}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
 
