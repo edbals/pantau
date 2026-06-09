@@ -16,37 +16,45 @@ describe('generateCodes', () => {
   test("'skip' renumbers past flagged numbers and preserves count", () => {
     expect(generateCodes({
       prefix: 'A', start: 1, count: 6,
-      rules: [{ number: 4, mode: 'skip' }, { number: 5, mode: 'skip' }],
+      rules: [{ target: 4, action: 'skip' }, { target: 5, action: 'skip' }],
     })).toEqual(['A-01', 'A-02', 'A-03', 'A-06', 'A-07', 'A-08'])
   })
 
-  test("'suffix' relabels as previous base + letter, keeping lot count", () => {
+  test("'replace' uses the exact label provided, keeping lot count", () => {
     expect(generateCodes({
       prefix: 'A', start: 1, count: 6,
-      rules: [{ number: 4, mode: 'suffix' }, { number: 5, mode: 'suffix' }],
-    })).toEqual(['A-01', 'A-02', 'A-03', 'A-03A', 'A-03B', 'A-06'])
+      rules: [
+        { target: 4, action: 'replace', value: '3A' },
+        { target: 5, action: 'replace', value: '3B' },
+      ],
+    })).toEqual(['A-01', 'A-02', 'A-03', 'A-3A', 'A-3B', 'A-06'])
   })
 
-  test('13 & 14 as suffix become 12A, 12B', () => {
+  test('13 & 14 replaced with explicit 12A, 12B', () => {
     expect(generateCodes({
       prefix: 'A', start: 11, count: 5,
-      rules: [{ number: 13, mode: 'suffix' }, { number: 14, mode: 'suffix' }],
+      rules: [
+        { target: 13, action: 'replace', value: '12A' },
+        { target: 14, action: 'replace', value: '12B' },
+      ],
     })).toEqual(['A-11', 'A-12', 'A-12A', 'A-12B', 'A-15'])
   })
 
-  test('mixes skip and suffix rules deterministically', () => {
+  test('mixes skip and replace rules deterministically', () => {
     expect(generateCodes({
       prefix: 'A', start: 1, count: 6,
-      rules: [{ number: 4, mode: 'skip' }, { number: 5, mode: 'suffix' }],
-    })).toEqual(['A-01', 'A-02', 'A-03', 'A-03A', 'A-06', 'A-07'])
+      rules: [
+        { target: 4, action: 'skip' },
+        { target: 5, action: 'replace', value: '3A' },
+      ],
+    })).toEqual(['A-01', 'A-02', 'A-03', 'A-3A', 'A-06', 'A-07'])
   })
 
-  test('letter resets after the next normal number', () => {
-    // 4 -> 3A, then 5 normal resets the base; 6 -> 5A (not 3B/5B).
+  test('replace does not compute or pad the value — it is taken literally', () => {
     expect(generateCodes({
-      prefix: 'A', start: 1, count: 6,
-      rules: [{ number: 4, mode: 'suffix' }, { number: 6, mode: 'suffix' }],
-    })).toEqual(['A-01', 'A-02', 'A-03', 'A-03A', 'A-05', 'A-05A'])
+      prefix: 'B', start: 1, count: 3,
+      rules: [{ target: 2, action: 'replace', value: 'Hook' }],
+    })).toEqual(['B-01', 'B-Hook', 'B-03'])
   })
 })
 
@@ -56,7 +64,7 @@ describe('generateGridCodes (back-compat wrapper)', () => {
     expect(generateGridCodes({ prefix: '3J', start: 1, count: 20, skip }))
       .toEqual(generateCodes({
         prefix: '3J', start: 1, count: 20,
-        rules: skip.map(number => ({ number, mode: 'skip' as const })),
+        rules: skip.map(target => ({ target, action: 'skip' as const })),
       }))
   })
 })

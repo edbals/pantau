@@ -25,13 +25,16 @@ describe('materializeGrid', () => {
     expect(new Set(units.map(u => u.id)).size).toBe(6)
   })
 
-  test('numbers cells via the deterministic engine (suffix rules)', () => {
+  test('numbers cells via the deterministic engine (replace rules)', () => {
     const units = materializeGrid(grid({
       rows: 1, cols: 6,
-      skipRules: [{ number: 4, mode: 'suffix' }, { number: 5, mode: 'suffix' }],
+      skipRules: [
+        { target: 4, action: 'replace', value: '3A' },
+        { target: 5, action: 'replace', value: '3B' },
+      ],
     }))
     expect(units.map(u => u.unit_code))
-      .toEqual(['A-01', 'A-02', 'A-03', 'A-03A', 'A-03B', 'A-06'])
+      .toEqual(['A-01', 'A-02', 'A-03', 'A-3A', 'A-3B', 'A-06'])
   })
 
   test('cells stay within the bounding box', () => {
