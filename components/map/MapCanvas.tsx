@@ -18,6 +18,7 @@ export interface CanvasUnit {
   progress_pct?: number
   status?: 'not_started' | 'in_progress' | 'pending_review' | 'completed'
   label?: string
+  assigned_contact_id?: string  // links to a ProjectContact in the directory
 }
 
 export type Tool = 'select' | 'draw' | 'delete' | 'grid' | 'paint' | 'hand'
@@ -46,6 +47,7 @@ interface Props {
   selectedGridId?: string | null
   onGridResize?: (id: string, bbox: GridRect) => void
   drawUnitType?: UnitType  // active draw preset (Kavling/Jalan/Fasos); default 'house'
+  bgTilt?: number  // live plan-tilt preview (degrees) applied to the bg image only
 }
 
 // Code prefix per drawn unit type (Kavling / Jalan / Fasos presets).
@@ -126,7 +128,7 @@ function clampToBox(x: number, y: number, w: number, h: number) {
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
   tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect, onAspectChange,
-  gridBoxes, selectedGridId, onGridResize, drawUnitType = 'house',
+  gridBoxes, selectedGridId, onGridResize, drawUnitType = 'house', bgTilt = 0,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -662,16 +664,19 @@ export default function MapCanvas({
         }}
         onPointerDown={handleSvgPointerDown}
       >
-        {/* Background image — pointer-events:none so it never blocks drawing */}
+        {/* Background image — pointer-events:none so it never blocks drawing.
+            bgTilt rotates it live around its centre for plan-straightening preview. */}
         {bgImageUrl && (
-          <image
-            href={bgImageUrl}
-            x={frame.x} y={frame.y}
-            width={frame.w} height={frame.h}
-            opacity={0.45}
-            preserveAspectRatio="xMidYMid meet"
-            style={{ pointerEvents: 'none' }}
-          />
+          <g transform={bgTilt ? `rotate(${bgTilt} ${frame.x + frame.w / 2} ${frame.y + frame.h / 2})` : undefined}>
+            <image
+              href={bgImageUrl}
+              x={frame.x} y={frame.y}
+              width={frame.w} height={frame.h}
+              opacity={0.45}
+              preserveAspectRatio="xMidYMid meet"
+              style={{ pointerEvents: 'none' }}
+            />
+          </g>
         )}
 
         {/* Units */}

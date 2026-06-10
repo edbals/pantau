@@ -1,5 +1,7 @@
 'use client'
 
+import { Sparkles } from 'lucide-react'
+
 export interface StudioStep {
   key: string
   label: string
@@ -9,10 +11,17 @@ export interface StudioStep {
   onClick?: () => void
 }
 
+interface Props {
+  steps: StudioStep[]
+  // Fired by the active step's "Tanya AI" button — parent highlights the
+  // relevant UI element to guide the user.
+  onAskAI?: (stepKey: string) => void
+}
+
 // A blueprint-styled progress HUD that floats over the canvas and highlights
 // the next step the user needs to take. The first not-done, non-optional step
 // is the "active" one.
-export default function StudioStepsHud({ steps }: { steps: StudioStep[] }) {
+export default function StudioStepsHud({ steps, onAskAI }: Props) {
   const activeIndex = steps.findIndex(s => !s.done && !s.optional)
 
   return (
@@ -53,6 +62,15 @@ export default function StudioStepsHud({ steps }: { steps: StudioStep[] }) {
                 {step.detail && <span className="ml-1 font-mono opacity-80">{step.detail}</span>}
               </span>
             </button>
+            {isActive && onAskAI && (
+              <button
+                onClick={() => onAskAI(step.key)}
+                title="Tanya AI — tunjukkan caranya"
+                className="ml-1 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-semibold transition-colors"
+                style={{ background: 'rgba(124,58,237,0.28)', color: '#C4B5FD', border: '1px solid rgba(124,58,237,0.4)' }}>
+                <Sparkles size={10} /> Tanya AI
+              </button>
+            )}
             {i < steps.length - 1 && (
               <span className="mx-0.5" style={{ color: 'rgba(150,185,225,0.3)' }}>›</span>
             )}

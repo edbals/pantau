@@ -8,6 +8,7 @@ import GridSizePicker from '@/components/map/GridSizePicker'
 import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud'
 import NumberRulesTable from '@/components/map/NumberRulesTable'
 import FloatingRefMap from '@/components/map/FloatingRefMap'
+import ShortcutsHud from '@/components/map/ShortcutsHud'
 import {
   validateUnitCodes,
   generateGridCodes,
@@ -26,10 +27,28 @@ import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
   Magnet, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
   Eye, AlignStartHorizontal, AlignStartVertical, AlignHorizontalDistributeCenter,
-  Home, Route, Trees,
+  Home, Route, Trees, MessageCircle, Send, Trash2, Plus,
 } from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
-type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
+type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor' | 'directory'
+
+// A project team member reachable via WhatsApp or Telegram.
+interface ProjectContact {
+  id: string
+  name: string
+  role: 'Subkontraktor' | 'Pengawas' | 'Field Manager'
+  contactUrl: string // wa.me/… or t.me/…
+}
+
+// Detect the messaging platform from a saved contact link.
+function contactPlatform(url: string): 'whatsapp' | 'telegram' | null {
+  if (!url) return null
+  if (/wa\.me|whatsapp/i.test(url)) return 'whatsapp'
+  if (/t\.me|telegram/i.test(url)) return 'telegram'
+  return null
+}
+
+const CONTACT_ROLES: ProjectContact['role'][] = ['Subkontraktor', 'Pengawas', 'Field Manager']
 
 // Local autosave draft. MUST carry the grid source-of-truth alongside the
 // materialized units — restoring units alone desyncs them from `grids` and
@@ -98,6 +117,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [drawPreset, setDrawPreset] = useState<UnitType>('house')
   // Floating "Lihat Denah" reference window (PiP of the original blueprint).
   const [showRefMap, setShowRefMap] = useState(false)
+  // "Tanya AI" guidance: id of the UI element to pulse, cleared after 3s.
+  const [activeHighlight, setActiveHighlight] = useState<string | null>(null)
+  const highlightTimer = useRef<number | null>(null)
   // Spacebar-to-pan: while Space is held the canvas behaves as the Hand tool,
   // then reverts to whatever tool was active. toolRef keeps the keydown closure
   // current without re-binding the listener on every tool change.
@@ -112,6 +134,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null)
   const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [planRotation, setPlanRotation] = useState(0)
+  // Rotation already baked into the current bgImageUrl (set at digitize time),
+  // so live tilt only previews the DELTA — no double-rotation.
+  const [bakedRotation, setBakedRotation] = useState(0)
   const [detectCount, setDetectCount] = useState<number | null>(null)
   const [detectError, setDetectError] = useState<string | null>(null)
   const [detectDiag, setDetectDiag] = useState<{ model: string | null; grids: number; areas: number } | null>(null)
@@ -126,6 +151,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [skipNumbers, setSkipNumbers] = useState<number[]>([])
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
+  // Project directory (WhatsApp / Telegram contacts) + its add-form fields.
+  const [projectContacts, setProjectContacts] = useState<ProjectContact[]>([])
+  const [contactName, setContactName] = useState('')
+  const [contactRole, setContactRole] = useState<ProjectContact['role']>('Subkontraktor')
+  const [contactUrl, setContactUrl] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   // Pending recoverable draft (offered via the banner). Holds the FULL draft so
   // recovery restores grids + rules, not just the flat units.
@@ -219,6 +249,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         setGlobalSkipRules(globalRules)
         if (Array.isArray(cd.skipNumbers)) setSkipNumbers(cd.skipNumbers)
         if (Array.isArray(cd.subs)) setSubs(cd.subs)
+        if (Array.isArray(cd.projectContacts)) setProjectContacts(cd.projectContacts)
 
         // Hydrate from the GridBlock model when present: re-materialize the active
         // units from grids + freeUnits so block selection + the config panel
@@ -399,7 +430,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           units,
           grids,
           freeUnits: units.filter(u => !parseGridCellId(u.id)),
-          globalSkipRules, skipNumbers, subs,
+          globalSkipRules, skipNumbers, subs, projectContacts,
         },
       }),
     })
@@ -410,7 +441,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [id, units, grids, globalSkipRules, skipNumbers, subs])
+  }, [id, units, grids, globalSkipRules, skipNumbers, subs, projectContacts])
 
   // Ctrl+S to save
   useEffect(() => {
@@ -536,6 +567,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
       // Show the exact image sent to Gemini so returned coordinates line up.
       setBgImageUrl(URL.createObjectURL(imageForAnalysis))
+      setBakedRotation(rotation) // this angle is now baked in; live tilt resets to delta 0
 
       const fd = new FormData()
       fd.append('image', imageForAnalysis)
@@ -689,6 +721,24 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setIsDirty(true)
   }
 
+  // ── Project directory CRUD ──
+  function addContact() {
+    const name = contactName.trim()
+    if (!name) return
+    setProjectContacts(prev => [...prev, {
+      id: `c_${Date.now()}`, name, role: contactRole, contactUrl: contactUrl.trim(),
+    }])
+    setContactName('')
+    setContactUrl('')
+    setIsDirty(true)
+  }
+  function deleteContact(cid: string) {
+    setProjectContacts(prev => prev.filter(c => c.id !== cid))
+    // Unassign from any units that referenced it.
+    setUnits(prev => prev.map(u => u.assigned_contact_id === cid ? { ...u, assigned_contact_id: undefined } : u))
+    setIsDirty(true)
+  }
+
   function goLive() {
     save().then(() => {
       fetch(`/api/v1/projects/${id}`, {
@@ -698,6 +748,27 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
       }).then(() => router.push(`/projects/${id}`))
     })
   }
+
+  // ── "Tanya AI" guidance: pulse a structural element for 3s ──
+  const STEP_HIGHLIGHT: Record<string, string> = {
+    denah: 'btn-upload-denah',
+    kavling: 'tool-grid',
+    urgensi: 'tab-urgency',
+    tim: 'tab-subcontractor',
+    golive: 'btn-golive',
+  }
+  function askAI(stepKey: string) {
+    const target = STEP_HIGHLIGHT[stepKey]
+    if (!target) return
+    // Make tab targets reachable, then pulse them.
+    if (target === 'tab-urgency') setConfigTab('urgency')
+    if (target === 'tab-subcontractor') setConfigTab('subcontractor')
+    setActiveHighlight(target)
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    highlightTimer.current = window.setTimeout(() => setActiveHighlight(null), 3000)
+  }
+  // Pulsating purple ring shown around the highlighted element.
+  const pulseRing = '0 0 0 2px #7C3AED, 0 0 18px rgba(124,58,237,0.7)'
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-base)' }}>
@@ -762,8 +833,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         )}
 
         {/* Upload site plan */}
-        <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium cursor-pointer"
-          style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>
+        <label id="btn-upload-denah"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium cursor-pointer ${activeHighlight === 'btn-upload-denah' ? 'animate-pulse' : ''}`}
+          style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)', boxShadow: activeHighlight === 'btn-upload-denah' ? pulseRing : undefined }}>
           {digitizing
             ? <><Loader2 size={14} className="animate-spin" /> Menganalisis...</>
             : <><Upload size={14} /> Upload Denah</>}
@@ -789,9 +861,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             : <><SaveIcon size={13} /> Simpan</>}
         </button>
 
-        <button onClick={goLive}
-          className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white"
-          style={{ background: 'var(--green)', boxShadow: '0 0 12px rgba(16,185,129,0.3)' }}>
+        <button id="btn-golive" onClick={goLive}
+          className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white ${activeHighlight === 'btn-golive' ? 'animate-pulse' : ''}`}
+          style={{ background: 'var(--green)', boxShadow: activeHighlight === 'btn-golive' ? pulseRing : '0 0 12px rgba(16,185,129,0.3)' }}>
           <Rocket size={14} /> Go Live
         </button>
       </div>
@@ -825,11 +897,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           ]).map(({ t, Icon, label, tip }) => (
             <div key={t} className="relative">
               <button onClick={() => setTool(t)} title={tip}
-                className="w-14 flex flex-col items-center gap-1 py-1.5 rounded-lg transition-all"
+                id={t === 'grid' ? 'tool-grid' : undefined}
+                className={`w-14 flex flex-col items-center gap-1 py-1.5 rounded-lg transition-all ${activeHighlight === 'tool-grid' && t === 'grid' ? 'animate-pulse' : ''}`}
                 style={{
                   background: tool === t ? 'var(--accent-sub)' : 'transparent',
                   border: tool === t ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
                   color: tool === t ? 'var(--accent-2)' : 'var(--t3)',
+                  boxShadow: activeHighlight === 'tool-grid' && t === 'grid' ? pulseRing : undefined,
                 }}>
                 <Icon size={18} />
                 <span className="text-[9px] font-medium leading-none">{label}</span>
@@ -919,12 +993,12 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             const assignedSubkon = units.filter(u => isSellableUnit(u) && u.subcontractor_color).length
             const steps: StudioStep[] = [
               { key: 'denah', label: 'Denah', done: !!bgImageUrl || units.length > 0 },
-              { key: 'unit', label: 'Unit', done: units.length > 0, detail: sellable > 0 ? String(sellable) : undefined, onClick: () => setTool('select') },
-              { key: 'subkon', label: 'Subkon', done: sellable > 0 && assignedSubkon === sellable, detail: sellable > 0 ? `${assignedSubkon}/${sellable}` : undefined, onClick: () => setConfigTab('subcontractor') },
-              { key: 'prioritas', label: 'Prioritas', optional: true, done: units.some(u => u.urgency && u.urgency !== 'normal'), onClick: () => setConfigTab('urgency') },
+              { key: 'kavling', label: 'Kavling', done: units.length > 0, detail: sellable > 0 ? String(sellable) : undefined, onClick: () => setTool('grid') },
+              { key: 'urgensi', label: 'Urgensi', done: units.some(u => u.urgency && u.urgency !== 'normal'), onClick: () => setConfigTab('urgency') },
+              { key: 'tim', label: 'Tim', done: sellable > 0 && assignedSubkon === sellable, detail: sellable > 0 ? `${assignedSubkon}/${sellable}` : undefined, onClick: () => setConfigTab('subcontractor') },
               { key: 'golive', label: 'Go Live', done: false, onClick: goLive },
             ]
-            return <StudioStepsHud steps={steps} />
+            return <StudioStepsHud steps={steps} onAskAI={askAI} />
           })()}
 
           {/* Draft recovery banner — restores the FULL draft (units + grids + rules) */}
@@ -963,6 +1037,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
             drawUnitType={drawPreset}
+            bgTilt={planRotation - bakedRotation}
             gridBoxes={gridBoxes}
             selectedGridId={selectedGridId}
             onGridResize={handleGridResize}
@@ -974,18 +1049,8 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             <FloatingRefMap imageUrl={bgImageUrl} onClose={() => setShowRefMap(false)} />
           )}
 
-          {/* Shortcuts HUD — mini-Canva hints */}
-          {!gridRect && tool === 'select' && (
-            <div className="absolute bottom-3 left-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 rounded-lg text-[10px]"
-              style={{ background: 'rgba(10,22,40,0.82)', border: '1px solid rgba(95,208,240,0.2)', color: 'rgba(207,232,255,0.75)', backdropFilter: 'blur(8px)', maxWidth: 'calc(100% - 120px)' }}>
-              <span><b style={{ color: '#BFEFFF' }}>Seret</b> pilih banyak</span>
-              <span><b style={{ color: '#BFEFFF' }}>Shift</b>+klik tambah</span>
-              <span><b style={{ color: '#BFEFFF' }}>Delete</b> hapus</span>
-              <span><b style={{ color: '#BFEFFF' }}>⌘Z</b> urungkan</span>
-              <span><b style={{ color: '#BFEFFF' }}>⌥</b> bebas-snap</span>
-              <span><b style={{ color: '#BFEFFF' }}>Scroll</b> zoom</span>
-            </div>
-          )}
+          {/* Shortcuts HUD — input cheatsheet */}
+          {!gridRect && tool === 'select' && <ShortcutsHud />}
 
           {/* Block Grid config panel */}
           {gridRect && (
@@ -1184,17 +1249,22 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               { key: 'type', label: 'Tipe' },
               { key: 'urgency', label: 'Urgensi' },
               { key: 'subcontractor', label: 'Subkon' },
-              { key: 'supervisor', label: 'Pengawas' },
-            ] as { key: ConfigTab; label: string }[]).map(tab => (
-              <button key={tab.key} onClick={() => setConfigTab(tab.key)}
-                className="flex-1 py-2.5 text-[11px] font-medium whitespace-nowrap transition-colors"
-                style={{
-                  color: configTab === tab.key ? 'var(--accent-2)' : 'var(--t3)',
-                  borderBottom: configTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
-                }}>
-                {tab.label}
-              </button>
-            ))}
+              { key: 'directory', label: 'Direktori' },
+            ] as { key: ConfigTab; label: string }[]).map(tab => {
+              const hlId = tab.key === 'urgency' ? 'tab-urgency' : tab.key === 'subcontractor' ? 'tab-subcontractor' : undefined
+              const pulsing = !!hlId && activeHighlight === hlId
+              return (
+                <button key={tab.key} id={hlId} onClick={() => setConfigTab(tab.key)}
+                  className={`flex-1 py-2.5 text-[11px] font-medium whitespace-nowrap transition-colors ${pulsing ? 'animate-pulse' : ''}`}
+                  style={{
+                    color: configTab === tab.key ? 'var(--accent-2)' : 'var(--t3)',
+                    borderBottom: configTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
+                    boxShadow: pulsing ? pulseRing : undefined,
+                  }}>
+                  {tab.label}
+                </button>
+              )
+            })}
           </div>
 
           <div className="flex-1 overflow-y-auto p-4">
@@ -1343,6 +1413,41 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                     </button>
                   </div>
                 </div>
+
+                {/* Assign a directory contact (dropdown, not raw text) */}
+                <div className="mb-2">
+                  <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Kontak / Tim</label>
+                  <div className="flex items-center gap-1.5">
+                    <select value={selected.assigned_contact_id ?? ''}
+                      onChange={e => updateSelected({ assigned_contact_id: e.target.value || undefined })}
+                      className="flex-1 px-2 py-1.5 rounded text-[12px] outline-none"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }}>
+                      <option value="">— Belum ditugaskan —</option>
+                      {projectContacts.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.role})</option>
+                      ))}
+                    </select>
+                    {(() => {
+                      const c = projectContacts.find(pc => pc.id === selected.assigned_contact_id)
+                      const platform = c && contactPlatform(c.contactUrl)
+                      if (!c || !platform) return null
+                      return (
+                        <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
+                          title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'} className="flex-shrink-0">
+                          {platform === 'whatsapp'
+                            ? <MessageCircle size={16} style={{ color: '#25D366' }} />
+                            : <Send size={15} style={{ color: '#229ED9' }} />}
+                        </a>
+                      )
+                    })()}
+                  </div>
+                  {projectContacts.length === 0 && (
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--t3)' }}>
+                      Tambah kontak di tab <b>Direktori</b> dulu.
+                    </p>
+                  )}
+                </div>
+
                 <button onClick={deleteSelected}
                   className="w-full py-1.5 rounded text-[11px] font-medium"
                   style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -1491,12 +1596,74 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               </div>
             )}
 
-            {/* Tab: Pengawas */}
+            {/* Tab: Pengawas (legacy placeholder; contacts now live in Direktori) */}
             {configTab === 'supervisor' && (
               <div>
                 <p className="text-[11px]" style={{ color: 'var(--t3)' }}>
                   Penugasan pengawas tersedia setelah proyek Go Live.
                 </p>
+              </div>
+            )}
+
+            {/* Tab: Direktori Proyek — WhatsApp / Telegram contacts */}
+            {configTab === 'directory' && (
+              <div className="space-y-3">
+                <p className="text-[11px]" style={{ color: 'var(--t3)' }}>
+                  Simpan kontak tim. Tautan menerima <b>wa.me/</b> (WhatsApp) atau <b>t.me/</b> (Telegram).
+                </p>
+
+                {/* Add contact form */}
+                <div className="space-y-2 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                  <input value={contactName} onChange={e => setContactName(e.target.value)}
+                    placeholder="Nama kontak"
+                    className="w-full px-2.5 py-1.5 rounded text-[12px] outline-none"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  <select value={contactRole} onChange={e => setContactRole(e.target.value as ProjectContact['role'])}
+                    className="w-full px-2.5 py-1.5 rounded text-[12px] outline-none"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }}>
+                    {CONTACT_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <input value={contactUrl} onChange={e => setContactUrl(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addContact()}
+                    placeholder="wa.me/62812… atau t.me/username"
+                    className="w-full px-2.5 py-1.5 rounded text-[12px] font-mono outline-none"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
+                  <button onClick={addContact} disabled={!contactName.trim()}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-[12px] font-semibold text-white"
+                    style={{ background: 'var(--accent)', opacity: contactName.trim() ? 1 : 0.5 }}>
+                    <Plus size={14} /> Tambah Kontak
+                  </button>
+                </div>
+
+                {/* Contact list */}
+                {projectContacts.length === 0 ? (
+                  <p className="text-[11px] text-center" style={{ color: 'var(--t3)' }}>Belum ada kontak.</p>
+                ) : projectContacts.map(c => {
+                  const platform = contactPlatform(c.contactUrl)
+                  return (
+                    <div key={c.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12px] truncate" style={{ color: 'var(--t1)' }}>{c.name}</div>
+                        <div className="text-[10px]" style={{ color: 'var(--t3)' }}>{c.role}</div>
+                      </div>
+                      {platform && (
+                        <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
+                          title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'}
+                          className="flex-shrink-0">
+                          {platform === 'whatsapp'
+                            ? <MessageCircle size={16} style={{ color: '#25D366' }} />
+                            : <Send size={15} style={{ color: '#229ED9' }} />}
+                        </a>
+                      )}
+                      <button onClick={() => deleteContact(c.id)} title="Hapus kontak"
+                        className="px-1.5 py-1 rounded flex-shrink-0"
+                        style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)' }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

@@ -64,6 +64,7 @@ export function captureCellOverrides(grid: GridBlock, units: CanvasUnit[]): Grid
     if (u.status && u.status !== 'not_started') soft.status = u.status
     if (typeof u.progress_pct === 'number' && u.progress_pct > 0) soft.progress_pct = u.progress_pct
     if (u.label) soft.label = u.label
+    if (u.assigned_contact_id) soft.assigned_contact_id = u.assigned_contact_id
     const key = cellKey(parsed.row, parsed.col)
     if (Object.keys(soft).length > 0) overrides[key] = soft
     else delete overrides[key]
