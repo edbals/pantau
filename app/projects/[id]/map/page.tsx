@@ -7,6 +7,7 @@ import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/ma
 import GridSizePicker from '@/components/map/GridSizePicker'
 import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud'
 import NumberRulesTable from '@/components/map/NumberRulesTable'
+import FloatingRefMap from '@/components/map/FloatingRefMap'
 import {
   validateUnitCodes,
   generateGridCodes,
@@ -24,13 +25,19 @@ import {
 import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
   Magnet, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
-  Eye, EyeOff, AlignStartHorizontal, AlignStartVertical, AlignHorizontalDistributeCenter,
+  Eye, AlignStartHorizontal, AlignStartVertical, AlignHorizontalDistributeCenter,
+  Home, Route, Trees,
 } from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor'
 
+// Local autosave draft. MUST carry the grid source-of-truth alongside the
+// materialized units — restoring units alone desyncs them from `grids` and
+// reverts the editor to grid-less flat units ("state amnesia").
 interface MapDraft {
   units: CanvasUnit[]
+  grids?: GridBlock[]
+  globalSkipRules?: SkipRule[]
   skipNumbers?: number[]
   savedAt: string
 }
@@ -87,8 +94,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(true)
-  // Opacity of the faded site-plan background, for before/after comparison.
-  const [bgOpacity, setBgOpacity] = useState(0.45)
+  // Active draw preset: what type a newly drawn unit gets (Kavling/Jalan/Fasos).
+  const [drawPreset, setDrawPreset] = useState<UnitType>('house')
+  // Floating "Lihat Denah" reference window (PiP of the original blueprint).
+  const [showRefMap, setShowRefMap] = useState(false)
   // Spacebar-to-pan: while Space is held the canvas behaves as the Hand tool,
   // then reverts to whatever tool was active. toolRef keeps the keydown closure
   // current without re-binding the listener on every tool change.
@@ -118,8 +127,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
   const [isDirty, setIsDirty] = useState(false)
-  const [draftUnits, setDraftUnits] = useState<CanvasUnit[] | null>(null)
-  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
+  // Pending recoverable draft (offered via the banner). Holds the FULL draft so
+  // recovery restores grids + rules, not just the flat units.
+  const [pendingDraft, setPendingDraft] = useState<MapDraft | null>(null)
   const validationIssues = useMemo(
     () => validateUnitCodes(units.map(u => u.unit_code), skipNumbers),
     [units, skipNumbers]
@@ -231,16 +241,20 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           const raw = localStorage.getItem(`pantau_map_${id}`)
           if (raw) {
             const draft = JSON.parse(raw) as MapDraft
+            // A draft from before the GridBlock era has no `grids` key. Restoring
+            // it against a project that HAS grids would wipe the block model
+            // ("state amnesia") — discard it instead of offering recovery.
+            const isStaleFormat = serverGrids.length > 0 && !Array.isArray(draft.grids)
             // Only offer recovery when the draft actually differs from what was
             // just loaded from the server — otherwise it's redundant noise.
-            const differs = JSON.stringify(draft.units ?? []) !== JSON.stringify(activeUnits)
+            const differs =
+              JSON.stringify(draft.units ?? []) !== JSON.stringify(activeUnits) ||
+              JSON.stringify(draft.grids ?? []) !== JSON.stringify(serverGrids)
             const dismissed = sessionStorage.getItem(`pantau_map_dismiss_${id}`) === draft.savedAt
-            if (draft.units?.length > 0 && differs && !dismissed) {
-              setDraftUnits(draft.units)
-              setDraftSavedAt(draft.savedAt)
-            } else if (!differs) {
-              // Draft matches server — clear the stale copy.
+            if (isStaleFormat || !differs) {
               localStorage.removeItem(`pantau_map_${id}`)
+            } else if (draft.units?.length > 0 && !dismissed) {
+              setPendingDraft(draft)
             }
           }
         } catch {}
@@ -481,12 +495,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     if (!isDirty) return
     const timer = setTimeout(() => {
       try {
-        const draft: MapDraft = { units, savedAt: new Date().toISOString() }
+        const draft: MapDraft = {
+          units,
+          grids: gridsRef.current,
+          globalSkipRules: globalRulesRef.current,
+          skipNumbers,
+          savedAt: new Date().toISOString(),
+        }
         localStorage.setItem(draftKey, JSON.stringify(draft))
       } catch {}
     }, 1500)
     return () => clearTimeout(timer)
-  }, [units, isDirty, draftKey])
+  }, [units, isDirty, draftKey, skipNumbers])
 
   // Warn before tab close / hard navigation when dirty
   useEffect(() => {
@@ -727,21 +747,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           </div>
         )}
 
-        {/* Blueprint transparency — before/after comparison */}
+        {/* Floating reference window toggle — PiP of the original blueprint */}
         {bgImageUrl && (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-            style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-            <button onClick={() => setBgOpacity(o => o > 0 ? 0 : 1)}
-              title={bgOpacity > 0 ? 'Sembunyikan denah' : 'Tampilkan denah'}
-              className="flex items-center justify-center"
-              style={{ color: bgOpacity > 0 ? 'var(--t2)' : 'var(--t3)' }}>
-              {bgOpacity > 0 ? <Eye size={15} /> : <EyeOff size={15} />}
-            </button>
-            <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--t3)' }}>Transparansi Denah</span>
-            <input type="range" min={0} max={1} step={0.05} value={bgOpacity}
-              onChange={e => setBgOpacity(Number(e.target.value))}
-              className="w-20" style={{ accentColor: 'var(--accent)' }} />
-          </div>
+          <button onClick={() => setShowRefMap(s => !s)}
+            title="Tampilkan denah asli dalam jendela mengambang"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium"
+            style={{
+              background: showRefMap ? 'var(--accent-sub)' : 'var(--bg-2)',
+              border: showRefMap ? '1px solid rgba(124,58,237,0.3)' : '1px solid var(--border)',
+              color: showRefMap ? 'var(--accent-2)' : 'var(--t2)',
+            }}>
+            <Eye size={14} /> Lihat Denah
+          </button>
         )}
 
         {/* Upload site plan */}
@@ -803,19 +820,43 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           {([
             { t: 'hand'   as Tool, Icon: Hand,          label: 'Geser',  tip: 'Geser peta (H atau tahan Spasi) — atau seret tombol tengah mouse' },
             { t: 'select' as Tool, Icon: MousePointer2, label: 'Pilih',  tip: 'Pilih & seret untuk pilih banyak (V)' },
-            { t: 'draw'   as Tool, Icon: Pencil,        label: 'Gambar', tip: 'Gambar unit (R)' },
+            { t: 'draw'   as Tool, Icon: Pencil,        label: 'Gambar', tip: 'Gambar unit (R) — pilih preset Kavling/Jalan/Fasos' },
             { t: 'grid'   as Tool, Icon: Grid3x3,       label: 'Grid',   tip: 'Grid blok otomatis (G)' },
           ]).map(({ t, Icon, label, tip }) => (
-            <button key={t} onClick={() => setTool(t)} title={tip}
-              className="w-14 flex flex-col items-center gap-1 py-1.5 rounded-lg transition-all"
-              style={{
-                background: tool === t ? 'var(--accent-sub)' : 'transparent',
-                border: tool === t ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
-                color: tool === t ? 'var(--accent-2)' : 'var(--t3)',
-              }}>
-              <Icon size={18} />
-              <span className="text-[9px] font-medium leading-none">{label}</span>
-            </button>
+            <div key={t} className="relative">
+              <button onClick={() => setTool(t)} title={tip}
+                className="w-14 flex flex-col items-center gap-1 py-1.5 rounded-lg transition-all"
+                style={{
+                  background: tool === t ? 'var(--accent-sub)' : 'transparent',
+                  border: tool === t ? '1px solid rgba(124,58,237,0.3)' : '1px solid transparent',
+                  color: tool === t ? 'var(--accent-2)' : 'var(--t3)',
+                }}>
+                <Icon size={18} />
+                <span className="text-[9px] font-medium leading-none">{label}</span>
+              </button>
+
+              {/* Draw presets flyout — what type the next drawn unit gets */}
+              {t === 'draw' && tool === 'draw' && (
+                <div className="absolute left-full top-0 ml-1.5 z-30 flex flex-col gap-0.5 p-1 rounded-lg"
+                  style={{ background: 'var(--bg-1)', border: '1px solid var(--border-md)', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+                  {([
+                    { type: 'house'       as UnitType, Icon: Home,  label: 'Kavling' },
+                    { type: 'road'        as UnitType, Icon: Route, label: 'Jalan' },
+                    { type: 'common_area' as UnitType, Icon: Trees, label: 'Fasos' },
+                  ]).map(({ type, Icon: PIcon, label: pLabel }) => (
+                    <button key={type} onClick={() => setDrawPreset(type)}
+                      title={`Gambar ${pLabel}`}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[11px] font-medium whitespace-nowrap transition-all"
+                      style={{
+                        background: drawPreset === type ? 'var(--accent-sub)' : 'transparent',
+                        color: drawPreset === type ? 'var(--accent-2)' : 'var(--t2)',
+                      }}>
+                      <PIcon size={14} />{pLabel}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
 
           <div className="w-8 h-px my-1" style={{ background: 'var(--border)' }} />
@@ -886,22 +927,29 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             return <StudioStepsHud steps={steps} />
           })()}
 
-          {/* Draft recovery banner */}
-          {draftUnits && (
+          {/* Draft recovery banner — restores the FULL draft (units + grids + rules) */}
+          {pendingDraft && (
             <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium"
               style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: 'var(--amber)', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
-              <span>💾 Ditemukan draft yang belum disimpan ({draftSavedAt ? new Date(draftSavedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '?'})</span>
-              <button onClick={() => { setIsDirty(true); setUnits(draftUnits); setDraftUnits(null) }}
+              <span>💾 Ditemukan draft yang belum disimpan ({new Date(pendingDraft.savedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})</span>
+              <button onClick={() => {
+                  setIsDirty(true)
+                  setUnits(pendingDraft.units)
+                  setGrids(pendingDraft.grids ?? [])
+                  if (pendingDraft.globalSkipRules) setGlobalSkipRules(pendingDraft.globalSkipRules)
+                  if (pendingDraft.skipNumbers) setSkipNumbers(pendingDraft.skipNumbers)
+                  setPendingDraft(null)
+                }}
                 className="px-3 py-1 rounded-lg text-xs font-semibold"
                 style={{ background: 'rgba(245,158,11,0.3)', color: 'var(--amber)' }}>
                 Pulihkan
               </button>
               <button onClick={() => {
                   try {
-                    if (draftSavedAt) sessionStorage.setItem(`pantau_map_dismiss_${id}`, draftSavedAt)
+                    sessionStorage.setItem(`pantau_map_dismiss_${id}`, pendingDraft.savedAt)
                     localStorage.removeItem(draftKey)
                   } catch {}
-                  setDraftUnits(null)
+                  setPendingDraft(null)
                 }}
                 className="opacity-60 hover:opacity-100 text-xs">
                 Abaikan ×
@@ -914,12 +962,17 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             selectedIds={selectedIds} onSelectionChange={setSelectedIds}
             tool={tool} snap={snapEnabled}
             bgImageUrl={bgImageUrl ?? undefined}
-            bgOpacity={bgOpacity}
+            drawUnitType={drawPreset}
             gridBoxes={gridBoxes}
             selectedGridId={selectedGridId}
             onGridResize={handleGridResize}
             onGridRect={rect => { setGridRect(rect); setGridPrefix('A'); setGridRows('2'); setGridCols('10') }}
           />
+
+          {/* Floating reference window — original blueprint PiP */}
+          {showRefMap && bgImageUrl && (
+            <FloatingRefMap imageUrl={bgImageUrl} onClose={() => setShowRefMap(false)} />
+          )}
 
           {/* Shortcuts HUD — mini-Canva hints */}
           {!gridRect && tool === 'select' && (

@@ -45,7 +45,12 @@ interface Props {
   gridBoxes?: Record<string, GridRect>
   selectedGridId?: string | null
   onGridResize?: (id: string, bbox: GridRect) => void
-  bgOpacity?: number  // opacity of the faded site-plan background (0-1)
+  drawUnitType?: UnitType  // active draw preset (Kavling/Jalan/Fasos); default 'house'
+}
+
+// Code prefix per drawn unit type (Kavling / Jalan / Fasos presets).
+const DRAW_CODE_PREFIX: Partial<Record<UnitType, string>> = {
+  house: 'U', road: 'JLN', common_area: 'FAS', facility: 'FAS',
 }
 
 // A unit id of the shape `${gridId}__r{r}c{c}` belongs to a grid block.
@@ -121,7 +126,7 @@ function clampToBox(x: number, y: number, w: number, h: number) {
 export default function MapCanvas({
   units, onChange, selectedId, onSelect, selectedIds, onSelectionChange,
   tool, snap = true, onPaintUnit, bgImageUrl, readOnly = false, showProgress = false, onGridRect, onAspectChange,
-  gridBoxes, selectedGridId, onGridResize, bgOpacity = 0.45,
+  gridBoxes, selectedGridId, onGridResize, drawUnitType = 'house',
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -432,10 +437,13 @@ export default function MapCanvas({
               // Hand off to parent — parent shows grid config panel
               onGridRect({ x: nx, y: ny, width: nw, height: nh })
             } else {
+              // Number within the preset's own series (U-/JLN-/FAS-).
+              const prefix = DRAW_CODE_PREFIX[drawUnitType] ?? 'U'
+              const count = units.filter(u => u.unit_type === drawUnitType).length
               const newUnit: CanvasUnit = {
                 id: uid(),
-                unit_code: `U-${String(units.length + 1).padStart(2, '0')}`,
-                unit_type: 'house', x: nx, y: ny, width: nw, height: nh, rotation: 0,
+                unit_code: `${prefix}-${String(count + 1).padStart(2, '0')}`,
+                unit_type: drawUnitType, x: nx, y: ny, width: nw, height: nh, rotation: 0,
               }
               onChange([...units, newUnit])
               emitSelection([newUnit.id])
@@ -486,7 +494,7 @@ export default function MapCanvas({
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, snap, onGridRect, onGridResize]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [units, onChange, onSelect, onSelectionChange, selection, svgSize, frame, tool, snap, onGridRect, onGridResize, drawUnitType]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function svgCoords(e: React.PointerEvent) {
     const svg = svgRef.current!
@@ -507,6 +515,17 @@ export default function MapCanvas({
     return true
   }
 
+  // Begin a draw/grid stroke from a pointer press — shared by the SVG background
+  // AND unit handlers, so a stroke can start on top of existing units/grid cells.
+  function beginDraw(e: React.PointerEvent) {
+    e.preventDefault()
+    const { x, y } = svgCoords(e)
+    const start = clampToBox(x, y, svgSize.w, svgSize.h)
+    drawing.current = { startX: start.x, startY: start.y }
+    setDraft({ x: start.x, y: start.y, w: 0, h: 0 })
+    emitSelection([])
+  }
+
   function handleSvgPointerDown(e: React.PointerEvent) {
     if (readOnly) return
     if (maybeStartPan(e)) return
@@ -514,10 +533,7 @@ export default function MapCanvas({
     e.preventDefault()
     const { x, y } = svgCoords(e)
     if (tool === 'draw' || tool === 'grid') {
-      const start = clampToBox(x, y, svgSize.w, svgSize.h)
-      drawing.current = { startX: start.x, startY: start.y }
-      setDraft({ x: start.x, y: start.y, w: 0, h: 0 })
-      emitSelection([])
+      beginDraw(e)
     } else if (tool === 'select') {
       // If the press lands inside the current selection's bounding box, move the
       // whole group (Figma-style) instead of starting a new marquee.
@@ -546,6 +562,15 @@ export default function MapCanvas({
     if (maybeStartPan(e)) return
     e.stopPropagation()
     if (e.button !== 0) return
+
+    // Draw/grid strokes must work anywhere on the canvas — including on top of
+    // existing units and grid cells. Without this, a denah covered by grid
+    // cells makes the Gambar tool appear dead (the press used to get hijacked
+    // into block selection + a block-move gesture).
+    if (tool === 'draw' || tool === 'grid') {
+      beginDraw(e)
+      return
+    }
 
     // Cells owned by a grid block aren't individually movable/resizable — the
     // block owns their geometry. Clicking selects the block; dragging moves it.
@@ -643,7 +668,7 @@ export default function MapCanvas({
             href={bgImageUrl}
             x={frame.x} y={frame.y}
             width={frame.w} height={frame.h}
-            opacity={bgOpacity}
+            opacity={0.45}
             preserveAspectRatio="xMidYMid meet"
             style={{ pointerEvents: 'none' }}
           />
