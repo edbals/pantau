@@ -18,7 +18,7 @@ export interface CanvasUnit {
   progress_pct?: number
   status?: 'not_started' | 'in_progress' | 'pending_review' | 'completed'
   label?: string
-  assigned_contact_id?: string  // links to a ProjectContact in the directory
+  assigned_contact_ids?: string[]  // links to ProjectContacts in the directory (multi-assign)
 }
 
 export type Tool = 'select' | 'draw' | 'delete' | 'grid' | 'paint' | 'hand'

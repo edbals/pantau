@@ -66,7 +66,10 @@ export default function FloatingRefMap({ imageUrl, onClose }: Props) {
         <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wide uppercase" style={{ color: 'var(--t3)' }}>
           <GripHorizontal size={12} /> Denah Asli
         </span>
-        <button onClick={onClose} title="Tutup"
+        <button
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onClose() }}
+          title="Tutup"
           className="flex items-center justify-center w-5 h-5 rounded hover:opacity-100 opacity-70"
           style={{ color: 'var(--t2)' }}>
           <X size={13} />

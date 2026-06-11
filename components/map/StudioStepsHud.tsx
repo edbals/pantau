@@ -1,6 +1,6 @@
 'use client'
 
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Loader2 } from 'lucide-react'
 
 export interface StudioStep {
   key: string
@@ -13,15 +13,16 @@ export interface StudioStep {
 
 interface Props {
   steps: StudioStep[]
-  // Fired by the active step's "Tanya AI" button — parent highlights the
-  // relevant UI element to guide the user.
+  // Fired by the active step's "Tanya AI" button — parent calls the AI copilot.
   onAskAI?: (stepKey: string) => void
+  copilotMessage?: string | null
+  copilotLoading?: boolean
 }
 
 // A blueprint-styled progress HUD that floats over the canvas and highlights
 // the next step the user needs to take. The first not-done, non-optional step
 // is the "active" one.
-export default function StudioStepsHud({ steps, onAskAI }: Props) {
+export default function StudioStepsHud({ steps, onAskAI, copilotMessage, copilotLoading }: Props) {
   const activeIndex = steps.findIndex(s => !s.done && !s.optional)
 
   return (
@@ -36,7 +37,21 @@ export default function StudioStepsHud({ steps, onAskAI }: Props) {
         const isActive = i === activeIndex
         const accent = step.done ? '#5FD0F0' : isActive ? '#BFEFFF' : 'rgba(150,185,225,0.45)'
         return (
-          <div key={step.key} className="flex items-center">
+          <div key={step.key} className="relative flex items-center">
+            {/* Copilot tooltip — anchored under the active step's Tanya AI button */}
+            {isActive && onAskAI && (copilotLoading || copilotMessage) && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-20 w-56 px-3 py-2 rounded-lg text-[11px] leading-snug"
+                style={{
+                  background: 'rgba(17,12,34,0.96)', border: '1px solid rgba(124,58,237,0.5)',
+                  color: '#EDE9FE', boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
+                }}>
+                <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45"
+                  style={{ background: 'rgba(17,12,34,0.96)', borderLeft: '1px solid rgba(124,58,237,0.5)', borderTop: '1px solid rgba(124,58,237,0.5)' }} />
+                {copilotLoading
+                  ? <span className="flex items-center gap-1.5" style={{ color: '#C4B5FD' }}><Loader2 size={12} className="animate-spin" /> Menganalisis…</span>
+                  : <span className="flex items-start gap-1.5"><Sparkles size={12} className="mt-0.5 flex-shrink-0" style={{ color: '#C4B5FD' }} />{copilotMessage}</span>}
+              </div>
+            )}
             <button
               onClick={step.onClick}
               disabled={!step.onClick}

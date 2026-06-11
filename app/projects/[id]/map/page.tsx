@@ -9,6 +9,8 @@ import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud
 import NumberRulesTable from '@/components/map/NumberRulesTable'
 import FloatingRefMap from '@/components/map/FloatingRefMap'
 import ShortcutsHud from '@/components/map/ShortcutsHud'
+import ContactDirectoryModal from '@/components/map/ContactDirectoryModal'
+import { type ProjectContact, contactPlatform } from '@/components/map/contacts'
 import {
   validateUnitCodes,
   generateGridCodes,
@@ -27,28 +29,10 @@ import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
   Magnet, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
   Eye, AlignStartHorizontal, AlignStartVertical, AlignHorizontalDistributeCenter,
-  Home, Route, Trees, MessageCircle, Send, Trash2, Plus,
+  Home, Route, Trees, MessageCircle, Send, Plus,
 } from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
 type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor' | 'directory'
-
-// A project team member reachable via WhatsApp or Telegram.
-interface ProjectContact {
-  id: string
-  name: string
-  role: 'Subkontraktor' | 'Pengawas' | 'Field Manager'
-  contactUrl: string // wa.me/… or t.me/…
-}
-
-// Detect the messaging platform from a saved contact link.
-function contactPlatform(url: string): 'whatsapp' | 'telegram' | null {
-  if (!url) return null
-  if (/wa\.me|whatsapp/i.test(url)) return 'whatsapp'
-  if (/t\.me|telegram/i.test(url)) return 'telegram'
-  return null
-}
-
-const CONTACT_ROLES: ProjectContact['role'][] = ['Subkontraktor', 'Pengawas', 'Field Manager']
 
 // Local autosave draft. MUST carry the grid source-of-truth alongside the
 // materialized units — restoring units alone desyncs them from `grids` and
@@ -117,9 +101,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [drawPreset, setDrawPreset] = useState<UnitType>('house')
   // Floating "Lihat Denah" reference window (PiP of the original blueprint).
   const [showRefMap, setShowRefMap] = useState(false)
-  // "Tanya AI" guidance: id of the UI element to pulse, cleared after 3s.
+  // "Tanya AI" copilot: highlighted element (pulsed 3s), plus the AI message
+  // shown in a tooltip and a loading flag.
   const [activeHighlight, setActiveHighlight] = useState<string | null>(null)
   const highlightTimer = useRef<number | null>(null)
+  const [copilotMessage, setCopilotMessage] = useState<string | null>(null)
+  const [copilotLoading, setCopilotLoading] = useState(false)
+  const copilotTimer = useRef<number | null>(null)
   // Spacebar-to-pan: while Space is held the canvas behaves as the Hand tool,
   // then reverts to whatever tool was active. toolRef keeps the keydown closure
   // current without re-binding the listener on every tool change.
@@ -151,11 +139,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [skipNumbers, setSkipNumbers] = useState<number[]>([])
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
-  // Project directory (WhatsApp / Telegram contacts) + its add-form fields.
+  // Project directory (WhatsApp / Telegram contacts), managed via a modal.
   const [projectContacts, setProjectContacts] = useState<ProjectContact[]>([])
-  const [contactName, setContactName] = useState('')
-  const [contactRole, setContactRole] = useState<ProjectContact['role']>('Subkontraktor')
-  const [contactUrl, setContactUrl] = useState('')
+  const [showContactModal, setShowContactModal] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   // Pending recoverable draft (offered via the banner). Holds the FULL draft so
   // recovery restores grids + rules, not just the flat units.
@@ -722,20 +708,18 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   }
 
   // ── Project directory CRUD ──
-  function addContact() {
-    const name = contactName.trim()
-    if (!name) return
-    setProjectContacts(prev => [...prev, {
-      id: `c_${Date.now()}`, name, role: contactRole, contactUrl: contactUrl.trim(),
-    }])
-    setContactName('')
-    setContactUrl('')
+  function addContact(contact: Omit<ProjectContact, 'id'>) {
+    setProjectContacts(prev => [...prev, { id: `c_${Date.now()}`, ...contact }])
     setIsDirty(true)
   }
   function deleteContact(cid: string) {
     setProjectContacts(prev => prev.filter(c => c.id !== cid))
-    // Unassign from any units that referenced it.
-    setUnits(prev => prev.map(u => u.assigned_contact_id === cid ? { ...u, assigned_contact_id: undefined } : u))
+    // Unassign from every unit that referenced it.
+    setUnits(prev => prev.map(u =>
+      u.assigned_contact_ids?.includes(cid)
+        ? { ...u, assigned_contact_ids: u.assigned_contact_ids.filter(x => x !== cid) }
+        : u
+    ))
     setIsDirty(true)
   }
 
@@ -749,23 +733,52 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     })
   }
 
-  // ── "Tanya AI" guidance: pulse a structural element for 3s ──
-  const STEP_HIGHLIGHT: Record<string, string> = {
-    denah: 'btn-upload-denah',
-    kavling: 'tool-grid',
-    urgensi: 'tab-urgency',
-    tim: 'tab-subcontractor',
-    golive: 'btn-golive',
-  }
-  function askAI(stepKey: string) {
-    const target = STEP_HIGHLIGHT[stepKey]
-    if (!target) return
-    // Make tab targets reachable, then pulse them.
+  // ── Agentic "Tanya AI" copilot: POST a canvas snapshot, render the reply, run the action ──
+  function highlightFor(target: string) {
     if (target === 'tab-urgency') setConfigTab('urgency')
     if (target === 'tab-subcontractor') setConfigTab('subcontractor')
+    if (target === 'tool-grid') setTool('grid')
     setActiveHighlight(target)
     if (highlightTimer.current) clearTimeout(highlightTimer.current)
     highlightTimer.current = window.setTimeout(() => setActiveHighlight(null), 3000)
+  }
+  async function askAI(stepKey: string) {
+    if (copilotLoading) return
+    if (copilotTimer.current) clearTimeout(copilotTimer.current)
+    setCopilotLoading(true)
+    setCopilotMessage(null)
+    const snapshot = {
+      activeStep: stepKey,
+      hasDenah: !!bgImageUrl,
+      unitCount: units.length,
+      gridCount: grids.length,
+      sellableUnits: countSellableUnits(units),
+      assignedUnits: units.filter(u => isSellableUnit(u) && u.assigned_contact_ids?.length).length,
+      urgencyUnits: units.filter(u => u.urgency && u.urgency !== 'normal').length,
+      contactsCount: projectContacts.length,
+    }
+    try {
+      const res = await fetch(`/api/v1/projects/${id}/map/copilot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      })
+      const json = await res.json()
+      const data = json.data as { message?: string; action?: string; targetElement?: string } | undefined
+      if (!data?.message) {
+        setCopilotMessage('AI sedang tidak tersedia. Coba lagi nanti.')
+      } else {
+        setCopilotMessage(data.message)
+        if ((data.action === 'highlight_ui' || data.action === 'skip_step') && data.targetElement) {
+          highlightFor(data.targetElement)
+        }
+      }
+    } catch {
+      setCopilotMessage('Koneksi AI gagal — periksa internet.')
+    } finally {
+      setCopilotLoading(false)
+      copilotTimer.current = window.setTimeout(() => setCopilotMessage(null), 9000)
+    }
   }
   // Pulsating purple ring shown around the highlighted element.
   const pulseRing = '0 0 0 2px #7C3AED, 0 0 18px rgba(124,58,237,0.7)'
@@ -998,7 +1011,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               { key: 'tim', label: 'Tim', done: sellable > 0 && assignedSubkon === sellable, detail: sellable > 0 ? `${assignedSubkon}/${sellable}` : undefined, onClick: () => setConfigTab('subcontractor') },
               { key: 'golive', label: 'Go Live', done: false, onClick: goLive },
             ]
-            return <StudioStepsHud steps={steps} onAskAI={askAI} />
+            return <StudioStepsHud steps={steps} onAskAI={askAI} copilotMessage={copilotMessage} copilotLoading={copilotLoading} />
           })()}
 
           {/* Draft recovery banner — restores the FULL draft (units + grids + rules) */}
@@ -1047,6 +1060,16 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           {/* Floating reference window — original blueprint PiP */}
           {showRefMap && bgImageUrl && (
             <FloatingRefMap imageUrl={bgImageUrl} onClose={() => setShowRefMap(false)} />
+          )}
+
+          {/* Team contact management modal */}
+          {showContactModal && (
+            <ContactDirectoryModal
+              contacts={projectContacts}
+              onAdd={addContact}
+              onDelete={deleteContact}
+              onClose={() => setShowContactModal(false)}
+            />
           )}
 
           {/* Shortcuts HUD — input cheatsheet */}
@@ -1246,7 +1269,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           {/* Config tabs */}
           <div className="flex border-b flex-shrink-0 overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
             {([
-              { key: 'type', label: 'Tipe' },
+              { key: 'type', label: 'Penomoran & Tipe' },
               { key: 'urgency', label: 'Urgensi' },
               { key: 'subcontractor', label: 'Subkon' },
               { key: 'directory', label: 'Direktori' },
@@ -1364,9 +1387,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                       → {preview.length} unit: {preview[0]} … {preview[preview.length - 1]}
                     </p>
                   )}
-                  <p className="text-[9px] text-center mt-1.5" style={{ color: 'var(--t3)' }}>
-                    Seret pegangan di kanvas untuk ubah ukuran blok
-                  </p>
                 </div>
               )
             })()}
@@ -1414,37 +1434,54 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   </div>
                 </div>
 
-                {/* Assign a directory contact (dropdown, not raw text) */}
+                {/* Assign one or more directory contacts (multi-assign) */}
                 <div className="mb-2">
-                  <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Kontak / Tim</label>
-                  <div className="flex items-center gap-1.5">
-                    <select value={selected.assigned_contact_id ?? ''}
-                      onChange={e => updateSelected({ assigned_contact_id: e.target.value || undefined })}
-                      className="flex-1 px-2 py-1.5 rounded text-[12px] outline-none"
-                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }}>
-                      <option value="">— Belum ditugaskan —</option>
-                      {projectContacts.map(c => (
-                        <option key={c.id} value={c.id}>{c.name} ({c.role})</option>
-                      ))}
-                    </select>
-                    {(() => {
-                      const c = projectContacts.find(pc => pc.id === selected.assigned_contact_id)
-                      const platform = c && contactPlatform(c.contactUrl)
-                      if (!c || !platform) return null
-                      return (
-                        <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
-                          title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'} className="flex-shrink-0">
-                          {platform === 'whatsapp'
-                            ? <MessageCircle size={16} style={{ color: '#25D366' }} />
-                            : <Send size={15} style={{ color: '#229ED9' }} />}
-                        </a>
-                      )
-                    })()}
-                  </div>
-                  {projectContacts.length === 0 && (
-                    <p className="text-[10px] mt-1" style={{ color: 'var(--t3)' }}>
-                      Tambah kontak di tab <b>Direktori</b> dulu.
-                    </p>
+                  <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Tim / Kontak</label>
+                  {projectContacts.length === 0 ? (
+                    <button onClick={() => { setConfigTab('directory'); setShowContactModal(true) }}
+                      className="w-full py-1.5 rounded text-[11px] font-medium"
+                      style={{ background: 'var(--bg-2)', color: 'var(--accent-2)', border: '1px solid var(--border-md)' }}>
+                      + Tambah kontak di Direktori
+                    </button>
+                  ) : (
+                    <div className="space-y-1">
+                      {projectContacts.map(c => {
+                        const assignedIds = selected.assigned_contact_ids ?? []
+                        const isAssigned = assignedIds.includes(c.id)
+                        const platform = contactPlatform(c.contactUrl)
+                        return (
+                          <div key={c.id} className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => updateSelected({
+                                assigned_contact_ids: isAssigned
+                                  ? assignedIds.filter(x => x !== c.id)
+                                  : [...assignedIds, c.id],
+                              })}
+                              className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded text-[11px] text-left"
+                              style={{
+                                background: isAssigned ? 'var(--accent-sub)' : 'var(--bg-2)',
+                                border: `1px solid ${isAssigned ? 'rgba(124,58,237,0.4)' : 'var(--border)'}`,
+                                color: isAssigned ? 'var(--accent-2)' : 'var(--t2)',
+                              }}>
+                              <span className="w-3 h-3 rounded-sm flex items-center justify-center flex-shrink-0 text-[8px]"
+                                style={{ background: isAssigned ? 'var(--accent)' : 'transparent', border: `1px solid ${isAssigned ? 'var(--accent)' : 'var(--border-md)'}`, color: '#fff' }}>
+                                {isAssigned ? '✓' : ''}
+                              </span>
+                              <span className="flex-1 truncate">{c.name}</span>
+                              <span className="text-[9px] opacity-70 flex-shrink-0">{c.role}</span>
+                            </button>
+                            {platform && (
+                              <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
+                                title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'} className="flex-shrink-0">
+                                {platform === 'whatsapp'
+                                  ? <MessageCircle size={15} style={{ color: '#25D366' }} />
+                                  : <Send size={14} style={{ color: '#229ED9' }} />}
+                              </a>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
 
@@ -1473,20 +1510,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               </div>
             )}
 
-            {/* Project settings (canvas empty state): edit the global numbering rules */}
-            {selectedIds.length === 0 && (
+            {/* Project settings — only on the first tab, only with nothing selected */}
+            {selectedIds.length === 0 && configTab === 'type' && (
               <div>
                 <p className="text-[10px] font-semibold tracking-widest uppercase mb-2" style={{ color: 'var(--accent-2)' }}>
                   Pengaturan Proyek
                 </p>
-                <p className="text-[11px] mb-3" style={{ color: 'var(--t3)' }}>
-                  Aturan nomor di bawah berlaku untuk semua blok yang memakai “Aturan Proyek”. Atur sekali di sini, tidak perlu per blok.
-                </p>
                 <NumberRulesTable rules={globalSkipRules} onChange={applyGlobalRules} />
-                <p className="text-[11px] text-center mt-5 pt-4" style={{ color: 'var(--t3)', borderTop: '1px solid var(--border)' }}>
-                  Pilih blok di kanvas untuk konfigurasi per-blok.<br />
-                  <span className="text-[10px]">Seret di area kosong untuk pilih banyak, Shift+klik untuk menambah.</span>
-                </p>
               </div>
             )}
 
@@ -1605,39 +1635,16 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               </div>
             )}
 
-            {/* Tab: Direktori Proyek — WhatsApp / Telegram contacts */}
+            {/* Tab: Direktori Proyek — list + a button into the management modal */}
             {configTab === 'directory' && (
-              <div className="space-y-3">
-                <p className="text-[11px]" style={{ color: 'var(--t3)' }}>
-                  Simpan kontak tim. Tautan menerima <b>wa.me/</b> (WhatsApp) atau <b>t.me/</b> (Telegram).
-                </p>
-
-                {/* Add contact form */}
-                <div className="space-y-2 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
-                  <input value={contactName} onChange={e => setContactName(e.target.value)}
-                    placeholder="Nama kontak"
-                    className="w-full px-2.5 py-1.5 rounded text-[12px] outline-none"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
-                  <select value={contactRole} onChange={e => setContactRole(e.target.value as ProjectContact['role'])}
-                    className="w-full px-2.5 py-1.5 rounded text-[12px] outline-none"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }}>
-                    {CONTACT_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                  <input value={contactUrl} onChange={e => setContactUrl(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && addContact()}
-                    placeholder="wa.me/62812… atau t.me/username"
-                    className="w-full px-2.5 py-1.5 rounded text-[12px] font-mono outline-none"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border-md)', color: 'var(--t1)' }} />
-                  <button onClick={addContact} disabled={!contactName.trim()}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-[12px] font-semibold text-white"
-                    style={{ background: 'var(--accent)', opacity: contactName.trim() ? 1 : 0.5 }}>
-                    <Plus size={14} /> Tambah Kontak
-                  </button>
-                </div>
-
-                {/* Contact list */}
+              <div className="space-y-2">
+                <button onClick={() => setShowContactModal(true)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-semibold text-white"
+                  style={{ background: 'var(--accent)' }}>
+                  <Plus size={14} /> Kelola Kontak Tim
+                </button>
                 {projectContacts.length === 0 ? (
-                  <p className="text-[11px] text-center" style={{ color: 'var(--t3)' }}>Belum ada kontak.</p>
+                  <p className="text-[11px] text-center pt-2" style={{ color: 'var(--t3)' }}>Belum ada kontak.</p>
                 ) : projectContacts.map(c => {
                   const platform = contactPlatform(c.contactUrl)
                   return (
@@ -1649,18 +1656,12 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                       </div>
                       {platform && (
                         <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
-                          title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'}
-                          className="flex-shrink-0">
+                          title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'} className="flex-shrink-0">
                           {platform === 'whatsapp'
                             ? <MessageCircle size={16} style={{ color: '#25D366' }} />
                             : <Send size={15} style={{ color: '#229ED9' }} />}
                         </a>
                       )}
-                      <button onClick={() => deleteContact(c.id)} title="Hapus kontak"
-                        className="px-1.5 py-1 rounded flex-shrink-0"
-                        style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)' }}>
-                        <Trash2 size={13} />
-                      </button>
                     </div>
                   )
                 })}
