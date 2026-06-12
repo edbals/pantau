@@ -161,3 +161,23 @@ Trade-off: SVG performance degrades above ~2000 elements. For 500-unit sites thi
 **Why:** Security review found that using `origin` from the request URL creates an open redirect vulnerability — an attacker controlling the `Host` header could redirect auth callbacks to a malicious domain and capture session tokens.
 
 **Where:** `app/auth/callback/route.ts`
+
+---
+
+## 2026-06-12 — Full UI redesign onto shadcn/ui + Tailwind v4 tokens
+
+**Decision:** The entire UI is migrating from the bespoke CSS-variable-inline-style system to **shadcn/ui components + standard Tailwind v4 design tokens**, under a "Dieter Rams / Anduril" dark aesthetic (true-neutral greys, high contrast, one restrained accent). **v0.dev drives the visual art direction; Claude ports each generated screen into the repo** (typed, data-wired, themed), incrementally — the app stays demoable throughout. Not a big-bang.
+
+**Why:** The hand-rolled `var(--bg-1)`/`var(--t1)`/`var(--accent)` inline-style system is hard to evolve and not compatible with generated/standard component code. shadcn + Tailwind tokens make future design work (and v0 output) drop in cleanly, and give a consistent, premium SaaS look. A YC-stage product can afford the longer, higher-quality route.
+
+**Foundation in place:** `lib/utils.ts` (`cn()`), `components.json` (Tailwind-v4 mode, `baseColor: neutral`, lucide), deps `clsx` / `tailwind-merge` / `class-variance-authority` / `tw-animate-css`. This repo is **Tailwind v4 (CSS-first — no `tailwind.config.ts`)**; the theme lives in `app/globals.css` via `@theme`.
+
+**Token collision (handle on first port):** legacy `--accent` (brand purple) and `--border` collide with shadcn's names (`--accent` = muted surface; brand = `--primary`). Plan: rename legacy `--accent*`→`--brand*` and `--border*`→`--hairline*`, let shadcn own the standard names, migrate screens one by one, and delete the legacy token block on the last screen.
+
+**Rules:**
+- Migrate in traffic order (login → dashboard → directory → setup → overview → review/spk → lapangan PWA → Map Studio chrome last).
+- **Do not restyle the Map Studio SVG canvas engine** (`MapCanvas.tsx`) — chrome/panels only; geometry logic is frozen.
+- A screen is "done" only when it carries no legacy `var(--*)` and `tsc` + `eslint` + `vitest` are green.
+- Dark-mode only for now; all color via tokens (no hardcoded hex); copy stays Bahasa Indonesia.
+
+**Where:** `app/globals.css`, `components.json`, `lib/utils.ts`, `components/ui/`
