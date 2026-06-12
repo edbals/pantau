@@ -12,6 +12,7 @@ export type Urgency = 'normal' | 'high' | 'critical'
 export type ReviewDecision = 'approved' | 'denied'
 export type TemplateLevel = 'global' | 'org' | 'project'
 export type ProjectMemberRole = 'project_manager' | 'koordinator' | 'pengawas'
+export type ContactPlatform = 'whatsapp' | 'telegram'
 
 export interface CanvasPosition {
   x: number        // 0-1 normalized
@@ -165,6 +166,34 @@ export interface ProjectNotification {
   project_id: string
   telegram_chat_id: string | null
   is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+// Join row: which roster contacts are assigned to a given project.
+export interface ProjectTeamMember {
+  id: string
+  project_id: string
+  contact_id: string
+  added_by: string | null
+  created_at: string
+}
+
+// Global team roster (org-scoped). The map editor links units to these by id.
+// `has_whatsapp`/`has_telegram` let one number be reachable on both apps;
+// `custom_attributes` is an open bag for the future Notion-style data grid.
+export interface Contact {
+  id: string
+  org_id: string
+  name: string
+  role: string
+  email: string | null
+  has_whatsapp: boolean
+  has_telegram: boolean
+  country_code: string
+  phone: string
+  custom_attributes: Record<string, unknown>
+  created_by: string | null
   created_at: string
   updated_at: string
 }
@@ -324,6 +353,36 @@ export type Database = {
         Row: ProjectNotification
         Insert: { project_id: string; telegram_chat_id?: string | null; is_active?: boolean }
         Update: { telegram_chat_id?: string | null; is_active?: boolean }
+      }
+      contacts: {
+        Row: Contact
+        Insert: {
+          org_id: string
+          name: string
+          role: string
+          email?: string | null
+          has_whatsapp?: boolean
+          has_telegram?: boolean
+          country_code?: string
+          phone: string
+          custom_attributes?: Record<string, unknown>
+          created_by?: string | null
+        }
+        Update: {
+          name?: string
+          role?: string
+          email?: string | null
+          has_whatsapp?: boolean
+          has_telegram?: boolean
+          country_code?: string
+          phone?: string
+          custom_attributes?: Record<string, unknown>
+        }
+      }
+      project_team_members: {
+        Row: ProjectTeamMember
+        Insert: { project_id: string; contact_id: string; added_by?: string | null }
+        Update: Record<never, never>
       }
     }
     Functions: {

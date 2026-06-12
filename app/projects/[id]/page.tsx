@@ -82,6 +82,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <span style={{ color: 'var(--t3)' }}>/</span>
         <span className="text-[14px] font-medium" style={{ color: 'var(--t1)' }}>{project?.name ?? '...'}</span>
         <div className="flex-1" />
+        <Link href={`/projects/${id}/setup`}
+          className="px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+          style={{ background: 'var(--accent-sub)', color: 'var(--accent-2)', border: '1px solid rgba(124,58,237,0.35)' }}>
+          👥 Kelola Tim Proyek
+        </Link>
         <Link href={`/projects/${id}/map`}
           className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
           style={{ background: 'var(--bg-3)', color: 'var(--t2)', border: '1px solid var(--border-md)' }}>

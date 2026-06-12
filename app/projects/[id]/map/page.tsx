@@ -6,11 +6,13 @@ import Link from 'next/link'
 import MapCanvas, { CanvasUnit, UnitType, GridRect, Tool } from '@/components/map/MapCanvas'
 import GridSizePicker from '@/components/map/GridSizePicker'
 import StudioStepsHud, { type StudioStep } from '@/components/map/StudioStepsHud'
+import CopilotFab from '@/components/map/CopilotFab'
 import NumberRulesTable from '@/components/map/NumberRulesTable'
 import FloatingRefMap from '@/components/map/FloatingRefMap'
-import ShortcutsHud from '@/components/map/ShortcutsHud'
-import ContactDirectoryModal from '@/components/map/ContactDirectoryModal'
-import { type ProjectContact, contactPlatform } from '@/components/map/contacts'
+import { WhatsAppIcon, TelegramIcon } from '@/components/icons/BrandIcons'
+import { whatsappUrlFor, telegramUrlFor, isLeadershipRole } from '@/components/map/contacts'
+import AutosaveIndicator from '@/components/ui/AutosaveIndicator'
+import type { Contact } from '@/lib/types/database'
 import {
   validateUnitCodes,
   generateGridCodes,
@@ -29,10 +31,10 @@ import {
   Undo2, Redo2, Hand, MousePointer2, Pencil, Grid3x3,
   Magnet, Loader2, Upload, Save as SaveIcon, Rocket, BrainCircuit,
   Eye, AlignStartHorizontal, AlignStartVertical, AlignHorizontalDistributeCenter,
-  Home, Route, Trees, MessageCircle, Send, Plus,
+  Home, Route, Trees, Plus, Users, ExternalLink,
 } from 'lucide-react'
 // SPK templates are managed separately at /spk, not inside the denah editor.
-type ConfigTab = 'type' | 'urgency' | 'subcontractor' | 'supervisor' | 'directory'
+type ConfigTab = 'type' | 'urgency' | 'contacts' | 'subcontractor'
 
 // Local autosave draft. MUST carry the grid source-of-truth alongside the
 // materialized units — restoring units alone desyncs them from `grids` and
@@ -139,9 +141,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
   const [skipNumbers, setSkipNumbers] = useState<number[]>([])
   const [subName, setSubName] = useState('')
   const [subs, setSubs] = useState<{ name: string; color: string }[]>([])
-  // Project directory (WhatsApp / Telegram contacts), managed via a modal.
-  const [projectContacts, setProjectContacts] = useState<ProjectContact[]>([])
-  const [showContactModal, setShowContactModal] = useState(false)
+  // This project's team (subset of the global roster, chosen on the setup page).
+  // Only these contacts are assignable to units; leadership is auto-assigned.
+  const [roster, setRoster] = useState<Contact[]>([])
   const [isDirty, setIsDirty] = useState(false)
   // Pending recoverable draft (offered via the banner). Holds the FULL draft so
   // recovery restores grids + rules, not just the flat units.
@@ -235,7 +237,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         setGlobalSkipRules(globalRules)
         if (Array.isArray(cd.skipNumbers)) setSkipNumbers(cd.skipNumbers)
         if (Array.isArray(cd.subs)) setSubs(cd.subs)
-        if (Array.isArray(cd.projectContacts)) setProjectContacts(cd.projectContacts)
 
         // Hydrate from the GridBlock model when present: re-materialize the active
         // units from grids + freeUnits so block selection + the config panel
@@ -276,6 +277,15 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           }
         } catch {}
       })
+  }, [id])
+
+  // Load this project's team (the contacts picked on the setup screen). Only
+  // these people are assignable to units; managed at /projects/[id]/setup.
+  useEffect(() => {
+    fetch(`/api/v1/projects/${id}/team`)
+      .then(r => r.json())
+      .then(j => { if (Array.isArray(j.data)) setRoster(j.data) })
+      .catch(() => {})
   }, [id])
 
   // ── Undo / redo (coalesces rapid changes such as drags into one step) ──
@@ -416,7 +426,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           units,
           grids,
           freeUnits: units.filter(u => !parseGridCellId(u.id)),
-          globalSkipRules, skipNumbers, subs, projectContacts,
+          globalSkipRules, skipNumbers, subs,
         },
       }),
     })
@@ -427,7 +437,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [id, units, grids, globalSkipRules, skipNumbers, subs, projectContacts])
+  }, [id, units, grids, globalSkipRules, skipNumbers, subs])
 
   // Ctrl+S to save
   useEffect(() => {
@@ -707,22 +717,6 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     setIsDirty(true)
   }
 
-  // ── Project directory CRUD ──
-  function addContact(contact: Omit<ProjectContact, 'id'>) {
-    setProjectContacts(prev => [...prev, { id: `c_${Date.now()}`, ...contact }])
-    setIsDirty(true)
-  }
-  function deleteContact(cid: string) {
-    setProjectContacts(prev => prev.filter(c => c.id !== cid))
-    // Unassign from every unit that referenced it.
-    setUnits(prev => prev.map(u =>
-      u.assigned_contact_ids?.includes(cid)
-        ? { ...u, assigned_contact_ids: u.assigned_contact_ids.filter(x => x !== cid) }
-        : u
-    ))
-    setIsDirty(true)
-  }
-
   function goLive() {
     save().then(() => {
       fetch(`/api/v1/projects/${id}`, {
@@ -733,6 +727,26 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     })
   }
 
+  // Onboarding workflow progress — the single source of truth shared by the
+  // stepper HUD and the copilot's "active step", so they can never disagree.
+  const stepProgress = useMemo(() => {
+    const sellable = countSellableUnits(units)
+    const assignedSubkon = units.filter(u => isSellableUnit(u) && u.subcontractor_color).length
+    return {
+      sellable, assignedSubkon,
+      denah: !!bgImageUrl || units.length > 0,
+      kavling: units.length > 0,
+      urgensi: units.some(u => u.urgency && u.urgency !== 'normal'),
+      tim: sellable > 0 && assignedSubkon === sellable,
+    }
+  }, [units, bgImageUrl])
+
+  const activeStepKey =
+    !stepProgress.denah   ? 'denah'   :
+    !stepProgress.kavling ? 'kavling' :
+    !stepProgress.urgensi ? 'urgensi' :
+    !stepProgress.tim     ? 'tim'     : 'golive'
+
   // ── Agentic "Tanya AI" copilot: POST a canvas snapshot, render the reply, run the action ──
   function highlightFor(target: string) {
     if (target === 'tab-urgency') setConfigTab('urgency')
@@ -742,20 +756,20 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
     if (highlightTimer.current) clearTimeout(highlightTimer.current)
     highlightTimer.current = window.setTimeout(() => setActiveHighlight(null), 3000)
   }
-  async function askAI(stepKey: string) {
+  async function askAI() {
     if (copilotLoading) return
     if (copilotTimer.current) clearTimeout(copilotTimer.current)
     setCopilotLoading(true)
     setCopilotMessage(null)
     const snapshot = {
-      activeStep: stepKey,
+      activeStep: activeStepKey,
       hasDenah: !!bgImageUrl,
       unitCount: units.length,
       gridCount: grids.length,
       sellableUnits: countSellableUnits(units),
       assignedUnits: units.filter(u => isSellableUnit(u) && u.assigned_contact_ids?.length).length,
       urgencyUnits: units.filter(u => u.urgency && u.urgency !== 'normal').length,
-      contactsCount: projectContacts.length,
+      contactsCount: roster.length,
     }
     try {
       const res = await fetch(`/api/v1/projects/${id}/map/copilot`, {
@@ -801,6 +815,11 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         <span className="text-[11px] px-2 py-0.5 rounded font-mono"
           style={{ background: 'var(--bg-3)', color: 'var(--t3)' }}>
           {project?.project_code}
+        </span>
+
+        {/* Subtle top-left autosave trust indicator */}
+        <span className="ml-1 hidden sm:inline-flex">
+          <AutosaveIndicator status={saving ? 'saving' : 'saved'} />
         </span>
 
         <div className="flex-1" />
@@ -1000,18 +1019,17 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
         {/* Canvas */}
         <div className="flex-1 overflow-hidden relative">
 
-          {/* Step-by-step progress HUD */}
+          {/* Step-by-step progress HUD — read-only workflow bar */}
           {!gridRect && (() => {
-            const sellable = countSellableUnits(units)
-            const assignedSubkon = units.filter(u => isSellableUnit(u) && u.subcontractor_color).length
+            const { sellable, assignedSubkon } = stepProgress
             const steps: StudioStep[] = [
-              { key: 'denah', label: 'Denah', done: !!bgImageUrl || units.length > 0 },
-              { key: 'kavling', label: 'Kavling', done: units.length > 0, detail: sellable > 0 ? String(sellable) : undefined, onClick: () => setTool('grid') },
-              { key: 'urgensi', label: 'Urgensi', done: units.some(u => u.urgency && u.urgency !== 'normal'), onClick: () => setConfigTab('urgency') },
-              { key: 'tim', label: 'Tim', done: sellable > 0 && assignedSubkon === sellable, detail: sellable > 0 ? `${assignedSubkon}/${sellable}` : undefined, onClick: () => setConfigTab('subcontractor') },
+              { key: 'denah', label: 'Denah', done: stepProgress.denah },
+              { key: 'kavling', label: 'Kavling', done: stepProgress.kavling, detail: sellable > 0 ? String(sellable) : undefined, onClick: () => setTool('grid') },
+              { key: 'urgensi', label: 'Urgensi', done: stepProgress.urgensi, onClick: () => setConfigTab('urgency') },
+              { key: 'tim', label: 'Tim', done: stepProgress.tim, detail: sellable > 0 ? `${assignedSubkon}/${sellable}` : undefined, onClick: () => setConfigTab('subcontractor') },
               { key: 'golive', label: 'Go Live', done: false, onClick: goLive },
             ]
-            return <StudioStepsHud steps={steps} onAskAI={askAI} copilotMessage={copilotMessage} copilotLoading={copilotLoading} />
+            return <StudioStepsHud steps={steps} />
           })()}
 
           {/* Draft recovery banner — restores the FULL draft (units + grids + rules) */}
@@ -1062,18 +1080,8 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             <FloatingRefMap imageUrl={bgImageUrl} onClose={() => setShowRefMap(false)} />
           )}
 
-          {/* Team contact management modal */}
-          {showContactModal && (
-            <ContactDirectoryModal
-              contacts={projectContacts}
-              onAdd={addContact}
-              onDelete={deleteContact}
-              onClose={() => setShowContactModal(false)}
-            />
-          )}
-
-          {/* Shortcuts HUD — input cheatsheet */}
-          {!gridRect && tool === 'select' && <ShortcutsHud />}
+          {/* AI copilot — viewport-fixed bottom-left floating button */}
+          <CopilotFab onAsk={askAI} loading={copilotLoading} message={copilotMessage} unitCount={units.length} />
 
           {/* Block Grid config panel */}
           {gridRect && (
@@ -1269,10 +1277,10 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
           {/* Config tabs */}
           <div className="flex border-b flex-shrink-0 overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
             {([
-              { key: 'type', label: 'Penomoran & Tipe' },
+              { key: 'type', label: 'Unit' },
               { key: 'urgency', label: 'Urgensi' },
+              { key: 'contacts', label: 'Pengawasan' },
               { key: 'subcontractor', label: 'Subkon' },
-              { key: 'directory', label: 'Direktori' },
             ] as { key: ConfigTab; label: string }[]).map(tab => {
               const hlId = tab.key === 'urgency' ? 'tab-urgency' : tab.key === 'subcontractor' ? 'tab-subcontractor' : undefined
               const pulsing = !!hlId && activeHighlight === hlId
@@ -1292,8 +1300,9 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
 
           <div className="flex-1 overflow-y-auto p-4">
 
-            {/* Grid block config — live rows/cols + custom numbering rules */}
-            {selectedGrid && (() => {
+            {/* Grid block config — live rows/cols + custom numbering rules.
+                Strictly owned by the Unit tab so selection never bleeds elsewhere. */}
+            {configTab === 'type' && selectedGrid && (() => {
               const g = selectedGrid
               const updateGrid = (patch: Partial<GridBlock>) => commitGrid({ ...g, ...patch })
               const rules = g.skipRules ?? []
@@ -1392,7 +1401,7 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             })()}
 
             {/* Selected unit info */}
-            {selected && (
+            {configTab === 'type' && selected && (
               <div className="mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
                 <p className="text-[10px] font-semibold tracking-widest uppercase mb-2" style={{ color: 'var(--t3)' }}>
                   Unit Dipilih
@@ -1434,48 +1443,64 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   </div>
                 </div>
 
-                {/* Assign one or more directory contacts (multi-assign) */}
+                {/* Pengawasan — assign project-team contacts to this unit.
+                    Leadership (CEO/PM/etc.) is auto-checked and read-only: they
+                    oversee every unit. isAssigned/disabled are derived purely so
+                    leadership never triggers a write (no render loops). */}
                 <div className="mb-2">
-                  <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Tim / Kontak</label>
-                  {projectContacts.length === 0 ? (
-                    <button onClick={() => { setConfigTab('directory'); setShowContactModal(true) }}
-                      className="w-full py-1.5 rounded text-[11px] font-medium"
+                  <label className="block text-[10px] mb-1" style={{ color: 'var(--t3)' }}>Pengawasan</label>
+                  {roster.length === 0 ? (
+                    <a href={`/projects/${id}/setup`} target="_blank" rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-[11px] font-medium"
                       style={{ background: 'var(--bg-2)', color: 'var(--accent-2)', border: '1px solid var(--border-md)' }}>
-                      + Tambah kontak di Direktori
-                    </button>
+                      <Plus size={12} /> Atur tim proyek di Setup
+                    </a>
                   ) : (
                     <div className="space-y-1">
-                      {projectContacts.map(c => {
+                      {roster.map(c => {
                         const assignedIds = selected.assigned_contact_ids ?? []
-                        const isAssigned = assignedIds.includes(c.id)
-                        const platform = contactPlatform(c.contactUrl)
+                        const isLeader = isLeadershipRole(c.role)
+                        const isAssigned = isLeader || assignedIds.includes(c.id)
                         return (
                           <div key={c.id} className="flex items-center gap-1.5">
                             <button
-                              onClick={() => updateSelected({
-                                assigned_contact_ids: isAssigned
-                                  ? assignedIds.filter(x => x !== c.id)
-                                  : [...assignedIds, c.id],
-                              })}
+                              disabled={isLeader}
+                              title={isLeader ? 'Pimpinan — otomatis ditugaskan ke semua unit' : undefined}
+                              onClick={() => {
+                                if (isLeader) return
+                                updateSelected({
+                                  assigned_contact_ids: assignedIds.includes(c.id)
+                                    ? assignedIds.filter(x => x !== c.id)
+                                    : [...assignedIds, c.id],
+                                })
+                              }}
                               className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded text-[11px] text-left"
                               style={{
                                 background: isAssigned ? 'var(--accent-sub)' : 'var(--bg-2)',
                                 border: `1px solid ${isAssigned ? 'rgba(124,58,237,0.4)' : 'var(--border)'}`,
                                 color: isAssigned ? 'var(--accent-2)' : 'var(--t2)',
+                                cursor: isLeader ? 'default' : 'pointer',
+                                opacity: isLeader ? 0.85 : 1,
                               }}>
                               <span className="w-3 h-3 rounded-sm flex items-center justify-center flex-shrink-0 text-[8px]"
                                 style={{ background: isAssigned ? 'var(--accent)' : 'transparent', border: `1px solid ${isAssigned ? 'var(--accent)' : 'var(--border-md)'}`, color: '#fff' }}>
                                 {isAssigned ? '✓' : ''}
                               </span>
                               <span className="flex-1 truncate">{c.name}</span>
-                              <span className="text-[9px] opacity-70 flex-shrink-0">{c.role}</span>
+                              {isLeader
+                                ? <span className="text-[8px] font-semibold flex-shrink-0 px-1 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.14)', color: 'var(--amber)' }}>Otomatis</span>
+                                : <span className="text-[9px] opacity-70 flex-shrink-0">{c.role}</span>}
                             </button>
-                            {platform && (
-                              <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
-                                title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'} className="flex-shrink-0">
-                                {platform === 'whatsapp'
-                                  ? <MessageCircle size={15} style={{ color: '#25D366' }} />
-                                  : <Send size={14} style={{ color: '#229ED9' }} />}
+                            {whatsappUrlFor(c) && (
+                              <a href={whatsappUrlFor(c)!} target="_blank" rel="noopener noreferrer"
+                                title="Chat WhatsApp" className="flex-shrink-0">
+                                <WhatsAppIcon size={15} />
+                              </a>
+                            )}
+                            {telegramUrlFor(c) && (
+                              <a href={telegramUrlFor(c)!} target="_blank" rel="noopener noreferrer"
+                                title="Chat Telegram" className="flex-shrink-0">
+                                <TelegramIcon size={15} />
                               </a>
                             )}
                           </div>
@@ -1494,13 +1519,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
             )}
 
             {/* Batch selection summary (more than one unit) */}
-            {selectedUnits.length > 1 && (
+            {configTab === 'type' && selectedUnits.length > 1 && (
               <div className="mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
                 <p className="text-[10px] font-semibold tracking-widest uppercase mb-2" style={{ color: 'var(--t3)' }}>
                   {selectedUnits.length} Unit Dipilih
                 </p>
                 <p className="text-[11px] mb-2" style={{ color: 'var(--t3)' }}>
-                  Atur tipe, urgensi, subkon, atau pengawas di bawah untuk semua sekaligus.
+                  Pakai tab Urgensi atau Subkon untuk mengatur semua unit terpilih sekaligus.
                 </p>
                 <button onClick={deleteSelected}
                   className="w-full py-1.5 rounded text-[11px] font-medium"
@@ -1538,6 +1563,13 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
                   )
                 })}
               </div>
+            )}
+
+            {/* Tab: Urgensi — empty state keeps the tab self-contained. */}
+            {configTab === 'urgency' && selectedUnits.length === 0 && (
+              <p className="text-[11px]" style={{ color: 'var(--t3)' }}>
+                Pilih satu atau beberapa unit di kanvas untuk mengatur urgensinya.
+              </p>
             )}
 
             {/* Tab: Urgensi */}
@@ -1626,45 +1658,53 @@ export default function MapPage({ params }: { params: Promise<{ id: string }> })
               </div>
             )}
 
-            {/* Tab: Pengawas (legacy placeholder; contacts now live in Direktori) */}
-            {configTab === 'supervisor' && (
-              <div>
-                <p className="text-[11px]" style={{ color: 'var(--t3)' }}>
-                  Penugasan pengawas tersedia setelah proyek Go Live.
-                </p>
-              </div>
-            )}
-
-            {/* Tab: Direktori Proyek — list + a button into the management modal */}
-            {configTab === 'directory' && (
+            {/* Tab: Pengawasan — read-only list of this project's team.
+                Membership is managed on the setup page; per-unit assignment
+                happens in the Unit tab's detail panel. */}
+            {configTab === 'contacts' && (
               <div className="space-y-2">
-                <button onClick={() => setShowContactModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-semibold text-white"
-                  style={{ background: 'var(--accent)' }}>
-                  <Plus size={14} /> Kelola Kontak Tim
-                </button>
-                {projectContacts.length === 0 ? (
-                  <p className="text-[11px] text-center pt-2" style={{ color: 'var(--t3)' }}>Belum ada kontak.</p>
-                ) : projectContacts.map(c => {
-                  const platform = contactPlatform(c.contactUrl)
-                  return (
-                    <div key={c.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg"
-                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[12px] truncate" style={{ color: 'var(--t1)' }}>{c.name}</div>
-                        <div className="text-[10px]" style={{ color: 'var(--t3)' }}>{c.role}</div>
+                <a href={`/projects/${id}/setup`} target="_blank" rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-semibold"
+                  style={{ background: 'var(--bg-2)', color: 'var(--accent-2)', border: '1px solid var(--border-md)' }}>
+                  <Users size={14} /> Atur Tim Proyek <ExternalLink size={12} />
+                </a>
+                <p className="text-[10px] leading-relaxed pt-0.5" style={{ color: 'var(--t3)' }}>
+                  Pilih unit di kanvas, lalu tugaskan pengawas dari panel unit. Pimpinan otomatis mengawasi semua unit.
+                </p>
+                {roster.length === 0 ? (
+                  <p className="text-[11px] text-center leading-relaxed pt-2" style={{ color: 'var(--t3)' }}>
+                    Belum ada tim yang ditugaskan. Kelola tim proyek Anda di{' '}
+                    <a href={`/projects/${id}/setup`} target="_blank" rel="noopener noreferrer"
+                      className="font-medium underline underline-offset-2" style={{ color: 'var(--accent-2)' }}>
+                      Pengaturan
+                    </a>.
+                  </p>
+                ) : roster.map(c => (
+                  <div key={c.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] truncate" style={{ color: 'var(--t1)' }}>{c.name}</div>
+                      <div className="text-[10px] flex items-center gap-1" style={{ color: 'var(--t3)' }}>
+                        {c.role}
+                        {isLeadershipRole(c.role) && (
+                          <span className="text-[8px] font-semibold px-1 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.14)', color: 'var(--amber)' }}>Otomatis</span>
+                        )}
                       </div>
-                      {platform && (
-                        <a href={c.contactUrl} target="_blank" rel="noopener noreferrer"
-                          title={platform === 'whatsapp' ? 'Chat WhatsApp' : 'Chat Telegram'} className="flex-shrink-0">
-                          {platform === 'whatsapp'
-                            ? <MessageCircle size={16} style={{ color: '#25D366' }} />
-                            : <Send size={15} style={{ color: '#229ED9' }} />}
-                        </a>
-                      )}
                     </div>
-                  )
-                })}
+                    {whatsappUrlFor(c) && (
+                      <a href={whatsappUrlFor(c)!} target="_blank" rel="noopener noreferrer"
+                        title="Chat WhatsApp" className="flex-shrink-0">
+                        <WhatsAppIcon size={16} />
+                      </a>
+                    )}
+                    {telegramUrlFor(c) && (
+                      <a href={telegramUrlFor(c)!} target="_blank" rel="noopener noreferrer"
+                        title="Chat Telegram" className="flex-shrink-0">
+                        <TelegramIcon size={16} />
+                      </a>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

@@ -122,6 +122,79 @@ skipNumbers are NOT in history yet — a good next step is a unified history.
 
 ---
 
+## Team Setup & Pengawasan Data Flow
+
+How people get onto a project and how the map auto-assigns leadership. Added in
+Phase 4/5. **Migrations `016`/`017`/`018` must be applied to Supabase** or none
+of this persists (the map's team fetch just returns empty and degrades cleanly).
+
+### The data: global roster → project team join
+- **`contacts`** (`016_contacts.sql` + `017_expand_contacts.sql`) — org-scoped
+  master roster. Cols: `id, org_id, name, role, email, has_whatsapp,
+  has_telegram, country_code, phone, custom_attributes`. RLS: org members read,
+  owner/PM write. Managed on the standalone `/projects/directory` page.
+- **`project_team_members`** (`018_project_team.sql`) — the join linking a
+  project to the roster contacts working on it:
+  ```sql
+  project_team_members(
+    id, project_id → projects(id) ON DELETE CASCADE,
+    contact_id → contacts(id) ON DELETE CASCADE,
+    added_by → users(id), created_at,
+    UNIQUE(project_id, contact_id)        -- indexed on both FKs
+  )
+  ```
+  RLS: project members (`user_project_role`) SELECT; `is_project_admin`
+  (owner/PM) manage (USING **and** WITH CHECK).
+- **API** `app/api/v1/projects/[id]/team/route.ts`:
+  - `GET` → resolves the join to full `Contact[]` (nested `contact:contacts(*)`,
+    flattened; cast through `unknown` because our hand-written `Database` type
+    carries no FK metadata so the embed types as an array).
+  - `PUT { contact_ids }` → **replace-set** (delete all for the project, re-insert
+    the validated ids). Server filters ids to those visible in the caller's org
+    before insert — never trusts client-supplied ids. Owner/PM only.
+
+### Routing funnel: Proyek Baru → Setup → Map
+- `/projects/new` (owner-only `POST /api/v1/projects`) now redirects to
+  `/projects/[id]/setup` (was `/map`).
+- `/projects/[id]/setup` (`app/projects/[id]/setup/page.tsx`, server) fetches the
+  project + full roster + current team ids, renders
+  `components/directory/ProjectTeamSetup.tsx` (client): a Notion-style checklist.
+  Toggling a contact **debounced-autosaves** (800ms) via `PUT …/team`; a top-left
+  `AutosaveIndicator` shows the state. The primary CTA **"Lanjut ke Pemetaan"**
+  flushes the pending save, then `router.push('/projects/[id]/map')`.
+- Existing projects reach setup from the `/projects/[id]` overview button
+  **"👥 Kelola Tim Proyek"** (sits next to "✏️ Edit Peta").
+
+### Map Studio: Pengawasan tab + leadership auto-assign
+- The map loads `GET /api/v1/projects/[id]/team` into `roster` — **the project
+  team only**, not the whole org roster. Only those people are assignable.
+- Renames: config tab "Kontak" → **"Pengawasan"**; unit-panel section header
+  "Tim / Kontak" → **"Pengawasan"**.
+- **Leadership auto-assign is pure render-time derivation — it never mutates
+  `canvas_data`** (this was an explicit requirement to avoid render loops):
+  - `isLeadershipRole(c.role)` (`components/map/contacts.ts`) substring-matches
+    CEO / Project Manager / Direktur / Pemilik / Pimpinan / etc. Deliberately
+    **excludes** "Field Manager" (operational, manually assigned).
+  - In the unit checklist: `isAssigned = isLeader || assignedIds.includes(c.id)`,
+    `disabled = isLeader`, and `onClick` early-returns for leaders. No effect, no
+    setState during render → leadership is never written into
+    `selected.assigned_contact_ids`, and there is no render loop.
+  - Net effect: leadership oversight is **implicit** (derived from role each
+    render), so it is *not* duplicated onto every unit in `canvas_data`.
+    Non-leadership assignments still persist in
+    `canvas_data.units[].assigned_contact_ids` as before.
+- Trust indicators: `components/ui/AutosaveIndicator.tsx`
+  (`AutosaveStatus = 'idle' | 'saving' | 'saved'`) render top-left in the Map
+  Studio header and on the Directory page.
+
+### Known seam (next step)
+Leadership is auto-checked+locked on the **map** but is a normal selectable row
+on the **setup** page — a user can leave a CEO off the project team and silently
+lose the map's auto-oversight. Reconcile by auto-selecting/locking leadership in
+setup too.
+
+---
+
 ## Gotchas / dev quirks
 
 - **Dev server**: `cd /Users/edbert/everything-claude-code/pantau && npm run dev`

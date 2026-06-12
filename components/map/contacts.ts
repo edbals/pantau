@@ -1,13 +1,26 @@
-// Shared project-directory contact model + helpers.
+// Shared helpers for the global team roster (the `contacts` table).
+// The row type itself lives in lib/types/database.ts (Contact).
 
-export interface ProjectContact {
-  id: string
-  name: string
-  role: string // preset or custom ("Lainnya") value
-  contactUrl: string // generated wa.me/… or t.me/… link
-}
+import type { ContactPlatform } from '@/lib/types/database'
+
+export type Platform = ContactPlatform
 
 export const CONTACT_ROLES = ['Subkontraktor', 'Pengawas', 'Field Manager'] as const
+
+// Leadership roles oversee the whole project — in the map editor they're
+// auto-assigned to every unit (checked + read-only). Matched by substring so
+// custom roles like "Pantau CEO" or "Manajer Proyek" still resolve. Deliberately
+// excludes "Field Manager" (operational, manually assigned per unit).
+const LEADERSHIP_KEYWORDS = [
+  'ceo', 'cto', 'coo', 'cfo', 'owner', 'pemilik', 'founder', 'pendiri',
+  'director', 'direktur', 'project manager', 'manajer proyek', 'pimpinan',
+  'principal', 'kepala proyek', 'leadership',
+]
+
+export function isLeadershipRole(role: string): boolean {
+  const r = role.toLowerCase()
+  return LEADERSHIP_KEYWORDS.some(k => r.includes(k))
+}
 
 // Common SE-Asia-first country codes; default +62 (Indonesia).
 export const COUNTRY_CODES: { code: string; label: string }[] = [
@@ -23,16 +36,6 @@ export const COUNTRY_CODES: { code: string; label: string }[] = [
   { code: '+61', label: 'AU +61' },
 ]
 
-export type Platform = 'whatsapp' | 'telegram'
-
-// Detect the platform from a saved link (for rendering the right icon).
-export function contactPlatform(url: string): Platform | null {
-  if (!url) return null
-  if (/wa\.me|whatsapp/i.test(url)) return 'whatsapp'
-  if (/t\.me|telegram/i.test(url)) return 'telegram'
-  return null
-}
-
 // Builds a wa.me / t.me link from structured fields — digits only, so a raw
 // user-supplied URL is never trusted or injected.
 export function buildContactUrl(platform: Platform, countryCode: string, phone: string): string {
@@ -40,4 +43,21 @@ export function buildContactUrl(platform: Platform, countryCode: string, phone: 
   const num = phone.replace(/\D/g, '').replace(/^0+/, '')
   const digits = `${cc}${num}`
   return platform === 'whatsapp' ? `https://wa.me/${digits}` : `https://t.me/+${digits}`
+}
+
+// A stored Contact can be reachable on WhatsApp and/or Telegram from the same
+// number. These return the deep link when that flag is on, else null.
+interface ContactLinkSource {
+  has_whatsapp: boolean
+  has_telegram: boolean
+  country_code: string
+  phone: string
+}
+
+export function whatsappUrlFor(c: Pick<ContactLinkSource, 'has_whatsapp' | 'country_code' | 'phone'>): string | null {
+  return c.has_whatsapp ? buildContactUrl('whatsapp', c.country_code, c.phone) : null
+}
+
+export function telegramUrlFor(c: Pick<ContactLinkSource, 'has_telegram' | 'country_code' | 'phone'>): string | null {
+  return c.has_telegram ? buildContactUrl('telegram', c.country_code, c.phone) : null
 }

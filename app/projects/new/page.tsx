@@ -44,7 +44,7 @@ export default function NewProjectPage() {
       return
     }
 
-    router.push(`/projects/${json.data.id}/map`)
+    router.push(`/projects/${json.data.id}/setup`)
   }
 
   return (
@@ -62,7 +62,7 @@ export default function NewProjectPage() {
         <div className="w-full max-w-md">
           <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--t1)' }}>Buat Proyek Baru</h1>
           <p className="text-sm mb-8" style={{ color: 'var(--t3)' }}>
-            Setelah dibuat, Anda akan langsung masuk ke Map Studio untuk menggambar denah.
+            Setelah dibuat, Anda akan memilih tim proyek terlebih dahulu, lalu masuk ke Map Studio.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -135,7 +135,7 @@ export default function NewProjectPage() {
               <button type="submit" disabled={loading}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
                 style={{ background: 'var(--accent)', boxShadow: '0 0 16px var(--accent-glow)' }}>
-                {loading ? 'Membuat...' : 'Buat & Mulai Peta →'}
+                {loading ? 'Membuat...' : 'Buat & Pilih Tim →'}
               </button>
             </div>
           </form>

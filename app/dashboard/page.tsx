@@ -56,6 +56,9 @@ export default async function DashboardPage() {
             style={{ background: 'var(--accent)', boxShadow: '0 0 12px var(--accent-glow)' }}>P</div>
           <span className="font-bold text-[15px]" style={{ color: 'var(--t1)' }}>Pantau</span>
         </div>
+        <Link href="/projects/directory" className="text-[12px] font-medium hover:opacity-80" style={{ color: 'var(--t2)' }}>
+          Direktori Tim
+        </Link>
         <div className="flex-1" />
         <span className="text-[12px] hidden sm:block" style={{ color: 'var(--t3)' }}>{orgName}</span>
         <span className="text-[11px] font-semibold px-2 py-1 rounded-full"
